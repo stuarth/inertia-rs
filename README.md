@@ -1,5 +1,7 @@
 # Inertia on Rust
 
+[![Current Crates.io Version](https://img.shields.io/crates/v/inertia-rs)](https://crates.io/crates/inertia_rs)
+
 [Inertia.js](https://inertiajs.com/) for [Rocket](https://rocket.rs/)
 
 ## Installation
