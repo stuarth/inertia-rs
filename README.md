@@ -13,11 +13,10 @@
 extern crate rocket;
 
 use inertia_rs::{Inertia, VersionFairing};
-use rocket::{fs::FileServer, response::Responder};
+use rocket::response::Responder;
 use rocket_dyn_templates::Template;
-use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 struct Hello {
     secret: String,
 }
@@ -32,21 +31,10 @@ fn hello() -> Inertia<Hello> {
     )
 }
 
-#[get("/stu")]
-fn stu() -> Inertia<Hello> {
-    Inertia::response(
-        "stu",
-        Hello {
-            secret: "stu's secret".into(),
-        },
-    )
-}
-
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .mount("/", routes![hello, stu])
-        .mount("/public", FileServer::from(rocket::fs::relative!("public")))
+        .mount("/", routes![hello])
         .attach(Template::fairing())
         // Version fairing is configured with current asset version, and a 
         // closure to generate the html template response
