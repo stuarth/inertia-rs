@@ -2,6 +2,13 @@
 
 [Inertia.js](https://inertiajs.com/) for [Rocket](https://rocket.rs/)
 
+## Installation
+
+Add the following line to your `Cargo.toml`
+```toml
+inertia_rs = "0.1.0"
+```
+
 ## Usage
 
 `inertia_rs` defines a succinct interface for creating Inertia.js apps in Rocket. It's comprised of two elements, `Inertia<T>`, a [Responder](https://api.rocket.rs/v0.5-rc/rocket/response/trait.Responder.html) that's generic over `T`, the Inertia component's properties, and `VersionFairing`, which is responsible for asset version checks.
