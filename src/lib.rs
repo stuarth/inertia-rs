@@ -118,7 +118,7 @@ impl<T> Inertia<T> {
 
 pub struct VersionFairing<'resp> {
     version: String,
-    html_response: Arc<Box<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>>,
+    html_response: Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>,
 }
 
 impl<'resp> VersionFairing<'resp> {
@@ -128,7 +128,7 @@ impl<'resp> VersionFairing<'resp> {
     {
         Self {
             version: version.into(),
-            html_response: Arc::new(Box::new(html_response)),
+            html_response: Arc::new(html_response),
         }
     }
 }
