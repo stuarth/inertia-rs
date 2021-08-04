@@ -2,7 +2,11 @@
 
 [Inertia.js](https://inertiajs.com/) for [Rocket](https://rocket.rs/)
 
-## Sample App
+## Usage
+
+`inertia_rs` defines a succinct interface for creating Inertia.js apps in Rocket. It's comprised of two elements, `Inertia<T>`, a [Responder](https://api.rocket.rs/v0.5-rc/rocket/response/trait.Responder.html) that's generic over `T`, the Inertia component's properties, and `VersionFairing`, which is responsible for asset version checks.
+
+### Sample App
 
 ```rust
 #[macro_use]
@@ -44,8 +48,11 @@ fn rocket() -> _ {
         .mount("/", routes![hello, stu])
         .mount("/public", FileServer::from(rocket::fs::relative!("public")))
         .attach(Template::fairing())
+        // Version fairing is configured with current asset version, and a 
+        // closure to generate the html template response
         .attach(VersionFairing::new("X2", |request, ctx| {
             Template::render("app", ctx).respond_to(request)
         }))
 }
+
 ```
