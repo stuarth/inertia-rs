@@ -7,7 +7,7 @@ homepage = "https://github.com/stuarth/inertia-rs"
 repository = "https://github.com/stuarth/inertia-rs"
 description = "Inertia.js for Rust"
 keywords = ["inertia", "web", "framework", "rocket"]
-categories = ["web-programming", "web-programming::http-server"]
+categories = ["web-programming"]
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
