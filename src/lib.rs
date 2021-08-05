@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate rocket;
 
-use std::sync::Arc;
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, Method};
 use rocket::request::Request;
@@ -9,7 +8,7 @@ use rocket::response::{self, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
 use serde::Serialize;
-
+use std::sync::Arc;
 
 #[derive(Serialize)]
 struct InertiaResponse<T> {
@@ -78,7 +77,7 @@ impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
                 None => {
                     error!("Responder not found");
                     http::Status::InternalServerError.respond_to(request)
-                },
+                }
             }
         }
     }
@@ -99,8 +98,8 @@ pub struct Inertia<T> {
 }
 
 impl<T> Inertia<T> {
-    /// Construct a response for the given component and props. Defaults to 
-    /// the request's url. 
+    /// Construct a response for the given component and props. Defaults to
+    /// the request's url.
     pub fn response<C: Into<String>>(component: C, props: T) -> Self {
         Self {
             component: component.into(),
@@ -118,13 +117,17 @@ impl<T> Inertia<T> {
 
 pub struct VersionFairing<'resp> {
     version: String,
-    html_response: Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>,
+    html_response:
+        Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>,
 }
 
 impl<'resp> VersionFairing<'resp> {
     pub fn new<'a, 'b, F, V: Into<String>>(version: V, html_response: F) -> Self
     where
-        F: Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync + 'static,
+        F: Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp>
+            + Send
+            + Sync
+            + 'static,
     {
         Self {
             version: version.into(),
@@ -150,7 +153,9 @@ fn version_conflict(location: String) -> VersionConflictResponse {
     VersionConflictResponse(location)
 }
 
-struct ResponderFn<'resp>(Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>);
+struct ResponderFn<'resp>(
+    Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>,
+);
 
 #[rocket::async_trait]
 impl Fairing for VersionFairing<'static> {
@@ -169,7 +174,6 @@ impl Fairing for VersionFairing<'static> {
 
     async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
         if request.method() == Method::Get && request.inertia_request() {
-
             // if the version header isn't sent, assume it's OK??
             if let Some(version) = request.inertia_version() {
                 info!(
