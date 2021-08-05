@@ -198,8 +198,34 @@ impl Fairing for VersionFairing<'static> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    use super::*;
+
+    #[derive(Serialize)]
+    struct Props {
+        n: i32,
     }
+
+    #[get("/foo")]
+    fn foo() -> Inertia<Props> {
+        Inertia::response("foo", Props { n: 42 })
+    }
+
+    fn rocket() -> rocket::Rocket<rocket::Build> {
+        rocket::build()
+            .mount("/", routes![foo])
+            .attach(VersionFairing::new("3", |request, ctx| todo!()))
+    }
+
+    #[test]
+    fn json_inertia_response_sent() {}
+
+    // rendering
+    // -- json when header present / version current
+    // -- html when header absent
+    // versions
+    // - equal
+    // - not equal
+    // - not present
+    // other
+    // - 404
 }
