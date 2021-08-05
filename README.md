@@ -1,6 +1,8 @@
 # Inertia on Rust
 
 [![Current Crates.io Version](https://img.shields.io/crates/v/inertia-rs)](https://crates.io/crates/inertia_rs)
+[![Build Status](https://github.com/stuarth/inertia-rs/workflows/CI/badge.svg)](https://github.com/stuarth/inertia-rs/actions)
+[![docs.rs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat-square)](https://docs.rs/inertia_rs/)
 
 [Inertia.js](https://inertiajs.com/) for [Rocket](https://rocket.rs/)
 
