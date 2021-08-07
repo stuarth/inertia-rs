@@ -27,7 +27,15 @@ inertia_rs = { version = "0.2.0", features = ["rocket"] }
 
 ## Usage
 
-`inertia_rs` defines a succinct interface for creating Inertia.js apps in Rocket. It's comprised of two elements, `Inertia<T>`, a [Responder](https://api.rocket.rs/v0.5-rc/rocket/response/trait.Responder.html) that's generic over `T`, the Inertia component's properties, and `VersionFairing`, which is responsible for asset version checks.
+`inertia_rs` defines a succinct interface for creating Inertia.js apps in Rocket. It's comprised of two elements, 
+
+* **`Inertia<T>`**
+  
+  a [Responder](https://api.rocket.rs/v0.5-rc/rocket/response/trait.Responder.html) that's generic over `T`, the Inertia component's properties
+  
+* **`VersionFairing`**
+   
+   Responsible for asset version checks. Constructed via `VersionFairing::new`, which is given the asset version and a closure responsible for generating the Inertia's HTML template.
 
 ### Sample Rocket Server
 
@@ -61,6 +69,8 @@ fn rocket() -> _ {
         .attach(Template::fairing())
         // Version fairing is configured with current asset version, and a 
         // closure to generate the html template response
+        // `ctx` contains `data_page`, a json-serialized string of 
+        // the inertia props
         .attach(VersionFairing::new("1", |request, ctx| {
             Template::render("app", ctx).respond_to(request)
         }))
