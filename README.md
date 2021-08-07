@@ -6,6 +6,18 @@
 
 [Inertia.js](https://inertiajs.com/) implementations for Rust. Currently supports [Rocket](https://rocket.rs/).
 
+## Why Inertia?
+
+From [inertiajs.com](https://inertiajs.com/)
+
+> Inertia is a new approach to building classic server-driven web apps. We call it the modern monolith.
+>
+> Inertia allows you to create fully client-side rendered, single-page apps, without much of the complexity that comes with modern SPAs. It does this by leveraging existing server-side frameworks.
+>
+> Inertia has no client-side routing, nor does it require an API. Simply build controllers and page views like you've always done!
+
+Inertia.rs brings an easy integration to Rust.
+
 ## Installation
 
 Add the following line to your `Cargo.toml`
