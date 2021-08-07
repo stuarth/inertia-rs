@@ -13,6 +13,9 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rocket = { version = "0.5.0-rc.1", features = ["json"] }
+rocket = { version = "0.5.0-rc.1", features = ["json"], optional = true }
 serde = {version = "1", features = ["derive"]}
-serde_json = "1.0.64"
+serde_json = "1.0"
+
+[features]
+default = ["rocket"]
