@@ -1,4 +1,4 @@
-# Inertia on Rust
+# Inertia.rs
 
 [![Current Crates.io Version](https://img.shields.io/crates/v/inertia-rs)](https://crates.io/crates/inertia_rs)
 [![Build Status](https://github.com/stuarth/inertia-rs/workflows/CI/badge.svg)](https://github.com/stuarth/inertia-rs/actions)
@@ -10,7 +10,7 @@
 
 Add the following line to your `Cargo.toml`
 ```toml
-inertia_rs = "0.1.0"
+inertia_rs = { version = "0.2.0", features = ["rocket"] }
 ```
 
 ## Usage
@@ -23,13 +23,13 @@ inertia_rs = "0.1.0"
 #[macro_use]
 extern crate rocket;
 
-use inertia_rs::{Inertia, VersionFairing};
+use inertia_rs::rocket::{Inertia, VersionFairing};
 use rocket::response::Responder;
 use rocket_dyn_templates::Template;
 
 #[derive(serde::Serialize)]
 struct Hello {
-    secret: String,
+    some_property: String,
 }
 
 #[get("/hello")]
@@ -38,7 +38,7 @@ fn hello() -> Inertia<Hello> {
         // the component to render
         "hello",
         // the props to pass our component
-        Hello { secret: "hello secret".into() },
+        Hello { some_property: "hello world!".into() },
     )
 }
 
@@ -49,7 +49,7 @@ fn rocket() -> _ {
         .attach(Template::fairing())
         // Version fairing is configured with current asset version, and a 
         // closure to generate the html template response
-        .attach(VersionFairing::new("X2", |request, ctx| {
+        .attach(VersionFairing::new("1", |request, ctx| {
             Template::render("app", ctx).respond_to(request)
         }))
 }
