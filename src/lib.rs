@@ -199,6 +199,10 @@ impl Fairing for VersionFairing<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket::{
+        http::{Header, Status},
+        local::blocking::Client,
+    };
 
     #[derive(Serialize)]
     struct Props {
@@ -210,22 +214,101 @@ mod tests {
         Inertia::response("foo", Props { n: 42 })
     }
 
+    const CURRENT_VERSION: &str = "1";
+
     fn rocket() -> rocket::Rocket<rocket::Build> {
         rocket::build()
             .mount("/", routes![foo])
-            .attach(VersionFairing::new("3", |request, ctx| todo!()))
+            .attach(VersionFairing::new(CURRENT_VERSION, |request, ctx| {
+                serde_json::to_string(ctx).unwrap().respond_to(request)
+            }))
     }
 
     #[test]
-    fn json_inertia_response_sent() {}
+    fn json_inertia_response_sent() {
+        let client = Client::tracked(rocket()).unwrap();
 
-    // rendering
-    // -- json when header present / version current
-    // -- html when header absent
-    // versions
-    // - equal
-    // - not equal
-    // - not present
-    // other
-    // - 404
+        let req = client.get("/foo").header(Header::new(X_INERTIA, "true"));
+
+        let resp = req.dispatch();
+        let headers = resp.headers();
+
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(headers.get_one("Content-Type"), Some("application/json"));
+    }
+
+    #[test]
+    fn html_response_sent() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        // no X-Inertia header should fall back to the response closure
+        let req = client.get("/foo");
+
+        let resp = req.dispatch();
+        let headers = resp.headers();
+
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(
+            headers.get_one("Content-Type"),
+            Some("text/plain; charset=utf-8")
+        );
+    }
+
+    #[test]
+    fn json_sent_versions_eq() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let req = client
+            .get("/foo")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION));
+
+        let resp = req.dispatch();
+        let headers = resp.headers();
+
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(headers.get_one("Content-Type"), Some("application/json"));
+    }
+
+    #[test]
+    fn json_sent_versions_different() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let req = client
+            .get("/foo")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, "OUTDATED_VERSION"));
+
+        let resp = req.dispatch();
+
+        assert_eq!(resp.status(), Status::Conflict);
+    }
+
+    #[test]
+    fn json_sent_version_absent() {
+        // NOTE: intended behavior (i.e. assume it's current) to be verified
+
+        let client = Client::tracked(rocket()).unwrap();
+
+        let req = client.get("/foo").header(Header::new(X_INERTIA, "true"));
+
+        let resp = req.dispatch();
+        let headers = resp.headers();
+
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(headers.get_one("Content-Type"), Some("application/json"));
+    }
+
+    #[test]
+    fn not_found_response() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let req = client
+            .get("/not/a/real/path")
+            .header(Header::new(X_INERTIA, "true"));
+
+        let resp = req.dispatch();
+
+        assert_eq!(resp.status(), Status::NotFound);
+    }
 }
