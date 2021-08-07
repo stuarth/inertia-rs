@@ -1,10 +1,10 @@
-use rocket::{get, error, info, routes, uri};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, Method};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
+use rocket::{error, get, info, routes, uri};
 use serde::Serialize;
 use std::sync::Arc;
 
