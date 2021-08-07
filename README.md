@@ -16,7 +16,7 @@ From [inertiajs.com](https://inertiajs.com/)
 >
 > Inertia has no client-side routing, nor does it require an API. Simply build controllers and page views like you've always done!
 
-Inertia.rs brings an easy integration to Rust.
+Inertia.rs brings a straightforward integration to Rust.
 
 ## Installation
 
