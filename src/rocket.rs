@@ -1,13 +1,13 @@
+use super::{Inertia, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, Method};
 use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
-use rocket::{error, get, trace, routes, uri};
+use rocket::{error, get, routes, trace, uri};
 use serde::Serialize;
 use std::sync::Arc;
-use super::{Inertia, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
 
 #[derive(Serialize)]
 struct InertiaResponse<T> {
@@ -160,7 +160,8 @@ impl Fairing for VersionFairing<'static> {
             if let Some(version) = request.inertia_version() {
                 trace!(
                     "request version {} / asset version {}",
-                    &version, &self.version
+                    &version,
+                    &self.version
                 );
 
                 if version != self.version {
