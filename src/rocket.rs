@@ -4,9 +4,10 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
-use rocket::{error, get, info, routes, uri};
+use rocket::{error, get, trace, routes, uri};
 use serde::Serialize;
 use std::sync::Arc;
+use super::{Inertia, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
 
 #[derive(Serialize)]
 struct InertiaResponse<T> {
@@ -16,9 +17,6 @@ struct InertiaResponse<T> {
     version: Option<InertiaVersion>,
 }
 
-static X_INERTIA: &str = "X-Inertia";
-static X_INERTIA_VERSION: &str = "X-Inertia-Version";
-static X_INERTIA_LOCATION: &str = "X-Inertia-Location";
 const BASE_ROUTE: &str = "/inertia-rs";
 
 trait InertiaRequest {
@@ -79,20 +77,6 @@ impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
             }
         }
     }
-}
-
-#[derive(Serialize)]
-struct PageObject<T> {
-    component: String,
-    props: T,
-    url: String,
-    version: String,
-}
-
-pub struct Inertia<T> {
-    component: String,
-    props: T,
-    url: Option<String>,
 }
 
 impl<T> Inertia<T> {
@@ -174,7 +158,7 @@ impl Fairing for VersionFairing<'static> {
         if request.method() == Method::Get && request.inertia_request() {
             // if the version header isn't sent, assume it's OK??
             if let Some(version) = request.inertia_version() {
-                info!(
+                trace!(
                     "request version {} / asset version {}",
                     &version, &self.version
                 );
@@ -185,7 +169,7 @@ impl Fairing for VersionFairing<'static> {
                         version_conflict(location = request.uri().path().as_str().to_owned())
                     );
 
-                    info!("\tredirecting to {}", &uri.to_string());
+                    trace!("\tredirecting to {}", &uri.to_string());
 
                     request.set_uri(uri);
                 }
