@@ -1,4 +1,4 @@
-use super::{Inertia, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
+use super::{Inertia, InertiaRequest, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, Method};
 use rocket::request::Request;
@@ -18,12 +18,6 @@ struct InertiaResponse<T> {
 }
 
 const BASE_ROUTE: &str = "/inertia-rs";
-
-trait InertiaRequest {
-    fn inertia_request(&self) -> bool;
-
-    fn inertia_version(&self) -> Option<String>;
-}
 
 impl<'a> InertiaRequest for Request<'a> {
     fn inertia_request(&self) -> bool {

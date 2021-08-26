@@ -10,12 +10,12 @@ keywords = ["inertia", "web", "framework", "rocket"]
 categories = ["web-programming"]
 readme = "README.md"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+http = "0.2"
 rocket = { version = "0.5.0-rc.1", features = ["json"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
+tower = { version = "0.4.8", features = ["full"], optional = true }
 
 [features]
-default = ["rocket"]
+default = ["rocket", "tower"]
