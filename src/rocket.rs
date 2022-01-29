@@ -5,9 +5,10 @@ use rocket::request::Request;
 use rocket::response::{self, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
-use rocket::{error, get, routes, trace, uri};
+use rocket::{error, get, routes, uri};
 use serde::Serialize;
 use std::sync::Arc;
+use tracing::trace;
 
 #[derive(Serialize)]
 struct InertiaResponse<T> {
