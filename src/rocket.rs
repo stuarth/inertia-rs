@@ -44,6 +44,12 @@ pub struct HtmlResponseContext {
 #[derive(Serialize, Clone)]
 struct InertiaVersion(String);
 
+impl AsRef<str> for InertiaVersion {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
 impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
     #[inline(always)]
     fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
@@ -157,24 +163,23 @@ impl Fairing for VersionFairing<'static> {
 
     async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
         if request.method() == Method::Get && request.inertia_request() {
-            // if the version header isn't sent, assume it's OK??
-            if let Some(version) = request.inertia_version() {
-                trace!(
-                    "request version {} / asset version {}",
-                    &version,
-                    &self.version
+            let request_version = request.inertia_version();
+
+            trace!(
+                "request version {:?} / asset version {}",
+                &request_version,
+                &self.version
+            );
+
+            if request_version.as_ref() != Some(&self.version) {
+                let uri = uri!(
+                    "/inertia-rs",
+                    version_conflict(location = request.uri().path().as_str().to_owned())
                 );
 
-                if version != self.version {
-                    let uri = uri!(
-                        "/inertia-rs",
-                        version_conflict(location = request.uri().path().as_str().to_owned())
-                    );
+                trace!("\tredirecting to {}", &uri.to_string());
 
-                    trace!("\tredirecting to {}", &uri.to_string());
-
-                    request.set_uri(uri);
-                }
+                request.set_uri(uri);
             }
         }
     }
@@ -206,19 +211,6 @@ mod tests {
             .attach(VersionFairing::new(CURRENT_VERSION, |request, ctx| {
                 serde_json::to_string(ctx).unwrap().respond_to(request)
             }))
-    }
-
-    #[test]
-    fn json_inertia_response_sent() {
-        let client = Client::tracked(rocket()).unwrap();
-
-        let req = client.get("/foo").header(Header::new(X_INERTIA, "true"));
-
-        let resp = req.dispatch();
-        let headers = resp.headers();
-
-        assert_eq!(resp.status(), Status::Ok);
-        assert_eq!(headers.get_one("Content-Type"), Some("application/json"));
     }
 
     #[test]
@@ -270,17 +262,13 @@ mod tests {
 
     #[test]
     fn json_sent_version_absent() {
-        // NOTE: intended behavior (i.e. assume it's current) to be verified
-
         let client = Client::tracked(rocket()).unwrap();
 
         let req = client.get("/foo").header(Header::new(X_INERTIA, "true"));
 
         let resp = req.dispatch();
-        let headers = resp.headers();
 
-        assert_eq!(resp.status(), Status::Ok);
-        assert_eq!(headers.get_one("Content-Type"), Some("application/json"));
+        assert_eq!(resp.status(), Status::Conflict);
     }
 
     #[test]
@@ -289,7 +277,8 @@ mod tests {
 
         let req = client
             .get("/not/a/real/path")
-            .header(Header::new(X_INERTIA, "true"));
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION));
 
         let resp = req.dispatch();
 
