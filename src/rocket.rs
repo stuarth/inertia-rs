@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use super::{Inertia, X_INERTIA, X_INERTIA_LOCATION, X_INERTIA_VERSION};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, Method};
