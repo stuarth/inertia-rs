@@ -96,6 +96,16 @@ fn empty_map<K, V>(map: &BTreeMap<K, V>) -> bool {
     map.is_empty()
 }
 
+#[derive(Clone, Debug, Default)]
+struct RouteProps(Vec<String>);
+
+// Internal responder bookkeeping should not affect protocol-level Page equality.
+impl PartialEq for RouteProps {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 fn prop_root(prop: &str) -> &str {
     prop.split_once('.')
         .map(|(root, _suffix)| root)
@@ -329,6 +339,30 @@ fn ensure_errors_prop(props: &mut Map<String, Value>) {
     props
         .entry("errors")
         .or_insert_with(|| Value::Object(Map::new()));
+}
+
+fn insert_shared_prop_path(props: &mut Map<String, Value>, path: &[&str], value: Value) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+
+    if path.len() == 1 {
+        if props.contains_key(path[0]) {
+            return false;
+        }
+
+        props.insert(path[0].to_owned(), value);
+        return true;
+    }
+
+    let entry = props
+        .entry(path[0].to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let Value::Object(nested) = entry else {
+        return false;
+    };
+
+    insert_shared_prop_path(nested, &path[1..], value)
 }
 
 fn string_set(values: &[String]) -> BTreeSet<&str> {
@@ -738,6 +772,8 @@ pub struct Page<T> {
     scroll_props: BTreeMap<String, ScrollProps>,
     #[serde(skip_serializing_if = "empty_map")]
     deferred_props: BTreeMap<String, Vec<String>>,
+    #[serde(skip)]
+    route_props: RouteProps,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     rescued_props: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -774,6 +810,7 @@ impl<T> Page<T> {
             match_props_on: metadata.match_props_on,
             scroll_props: metadata.scroll_props,
             deferred_props: metadata.deferred_props,
+            route_props: RouteProps::default(),
             rescued_props: metadata.rescued_props,
             shared_props: metadata.shared_props,
             once_props: metadata.once_props,
@@ -804,6 +841,56 @@ impl<T> Page<T> {
     /// Returns the asset version, if present.
     pub fn asset_version(&self) -> Option<&str> {
         self.version.as_deref()
+    }
+}
+
+impl Page<Value> {
+    /// Merges shared props into the page object.
+    ///
+    /// Existing page props take precedence when keys collide. Dotted keys are
+    /// expanded into nested objects, and inserted top-level keys are added to
+    /// the page object's `sharedProps` metadata.
+    pub fn with_shared_props<I, K>(mut self, shared_props: I) -> Self
+    where
+        I: IntoIterator<Item = (K, Value)>,
+        K: Into<String>,
+    {
+        if !self.props.is_object() {
+            self.props = Value::Object(Map::new());
+        }
+
+        let props = self
+            .props
+            .as_object_mut()
+            .expect("props was normalized to an object");
+        ensure_errors_prop(props);
+        let route_roots = if self.route_props.0.is_empty() {
+            props.keys().cloned().collect::<BTreeSet<_>>()
+        } else {
+            self.route_props.0.iter().cloned().collect()
+        };
+
+        for (key, value) in shared_props {
+            let key = key.into();
+            let path = key
+                .split('.')
+                .filter(|segment| !segment.is_empty())
+                .collect::<Vec<_>>();
+            let Some(root) = path.first() else {
+                continue;
+            };
+            let root = (*root).to_owned();
+
+            if route_roots.contains(&root) {
+                continue;
+            }
+
+            if insert_shared_prop_path(props, &path, value) && !self.shared_props.contains(&root) {
+                self.shared_props.push(root);
+            }
+        }
+
+        self
     }
 }
 
@@ -1171,11 +1258,18 @@ impl<T: Serialize> Inertia<T> {
         let component = self.component;
         let metadata = self.metadata;
         let mut props = serde_json::to_value(self.props)?;
+        let route_props = props
+            .as_object()
+            .map(|props| props.keys().cloned().collect())
+            .unwrap_or_default();
 
         request.filter_props(&component, &mut props, &metadata);
         let metadata = metadata.for_response(request, &component, props.as_object());
 
-        Ok(Page::from_parts(component, props, url, version, metadata))
+        let mut page = Page::from_parts(component, props, url, version, metadata);
+        page.route_props = RouteProps(route_props);
+
+        Ok(page)
     }
 }
 
@@ -1494,5 +1588,38 @@ mod tests {
             value["onceProps"]["billing"],
             json!({ "prop": "plans", "expiresAt": 123 })
         );
+    }
+
+    #[test]
+    fn page_equality_ignores_internal_route_prop_tracking() {
+        let request = request_context_from(&[]);
+        let response = Inertia::response(
+            "Users",
+            json!({
+                "auth": {
+                    "user": {
+                        "name": "Ada"
+                    }
+                }
+            }),
+        )
+        .into_page("/users", Some("version-1".into()), &request)
+        .unwrap();
+        let manual = Page::from_parts(
+            "Users",
+            json!({
+                "errors": {},
+                "auth": {
+                    "user": {
+                        "name": "Ada"
+                    }
+                }
+            }),
+            "/users",
+            Some("version-1".into()),
+            PageMetadata::new(),
+        );
+
+        assert_eq!(response, manual);
     }
 }

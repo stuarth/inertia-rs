@@ -102,7 +102,7 @@ The simple API remains the shortest path for standard pages:
 Inertia::response("Users/Index", props)
 ```
 
-For v3 page metadata, chain explicit helpers on the response or use the `Inertia::page(...).props(...)` builder. Deferred props are listed in `deferredProps` and omitted until an Inertia partial reload explicitly requests them; this crate does not yet provide lazy async prop resolvers. `share()` only marks `sharedProps` metadata and does not register global shared application state.
+For v3 page metadata, chain explicit helpers on the response or use the `Inertia::page(...).props(...)` builder. Deferred props are listed in `deferredProps` and omitted until an Inertia partial reload explicitly requests them; this crate does not yet provide lazy async prop resolvers. `share()` marks `sharedProps` metadata, while the Rocket integration can register shared application state as shown below.
 
 ```rust
 Inertia::response("Users/Index", props)
@@ -127,6 +127,24 @@ use inertia_rs::{Page, PageMetadata, RequestContext};
 ```
 
 Rocket responses use these types internally. `RequestContext` parses Inertia headers such as `X-Inertia-Partial-Data`, `X-Inertia-Partial-Except`, `X-Inertia-Reset`, and `X-Inertia-Except-Once-Props`.
+
+## Rocket Shared Props
+
+Register `rocket::SharedProps` as managed state to merge common application data into every Rocket page response.
+
+```rust
+use inertia_rs::rocket::SharedProps;
+
+let shared_props = SharedProps::new()
+    .value("appName", "My App")
+    .prop("auth.csrfToken", |request| {
+        request.headers().get_one("X-CSRF").map(ToOwned::to_owned)
+    });
+
+let rocket = rocket::build().manage(shared_props);
+```
+
+Shared props are shallow-merged into page props for HTML first loads and JSON Inertia responses. Route props win on key collisions, including when a route-defined root such as `auth` collides with dotted shared keys such as `auth.user`. Keys may be top-level or dotted, where `auth.user` becomes `props.auth.user`; inserted top-level keys are listed in `sharedProps`. Keep shared props small and namespace them, since they are merged after partial-reload filtering and remain included on partial reload responses.
 
 ## Redirect Helpers
 
