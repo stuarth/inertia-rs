@@ -27,25 +27,10 @@ The minimum supported Rust version is 1.88.
 
 ## Protocol Support
 
-| Feature | Status | Notes |
-| --- | --- | --- |
-| Initial HTML response | Supported | Rocket renders the application shell through `VersionFairing`. |
-| JSON Inertia response | Supported | Responses include `X-Inertia: true` and `Vary: X-Inertia`. |
-| Asset version conflicts | Supported | Stale Inertia `GET` requests return `409 Conflict` with `X-Inertia-Location`. |
-| Dynamic asset versions | Supported | `VersionFairing::dynamic` reads the current version when page responses or version checks need it. |
-| Query-string URLs | Supported | Page object URLs preserve the request query string. |
-| Public header helpers | Supported | Header constants are available at the crate root and through `inertia_rs::headers`. |
-| Request header parsing | Supported | `RequestContext` is framework-neutral; Rocket exposes `InertiaHeaders`. |
-| Partial reloads | Supported | Matching components honor `X-Inertia-Partial-Data` and `X-Inertia-Partial-Except`. |
-| Merge props | Supported | `mergeProps`, `prependProps`, `deepMergeProps`, `matchPropsOn`, reset handling, and infinite-scroll intent are modeled. |
-| Deferred props | Partial | `InertiaProps::defer` emits `deferredProps` metadata and resolves synchronous values only when requested. Async deferred resolvers are planned. |
-| Lazy or async props | Partial | `InertiaProps` supports synchronous lazy, optional, always, deferred, and once props. Async resolvers are planned. |
-| Once props | Supported | `onceProps` metadata and `X-Inertia-Except-Once-Props` filtering are modeled. |
-| Shared props | Supported | Rocket managed state and Axum extension layers can merge common props into every page response. |
-| External location redirects | Supported | `Inertia::location` maps Inertia visits to `409 Conflict` with `X-Inertia-Location`. |
-| Method-aware redirects | Supported | `Inertia::redirect` returns `303 See Other` for write methods. |
-| SSR | Not supported | No server-side rendering bridge is provided. |
-| Axum | Partial | `InertiaRequest`, `VersionLayer`, `SharedProps`, page rendering, external locations, and method-aware redirects are available. |
+The canonical Rocket and Axum support matrix lives in
+[`docs/protocol-support.md`](docs/protocol-support.md). It tracks adapter
+support, known partial areas, and representative tests for each protocol
+feature.
 
 ## Installation
 
