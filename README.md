@@ -17,10 +17,33 @@ Inertia lets you build server-driven applications that render client-side pages 
 - Asset version checks with `X-Inertia-Version`.
 - `409 Conflict` responses with `X-Inertia-Location` for stale assets.
 - Inertia v3 page-object metadata and response filtering for partial reloads, merge props, deferred prop keys, once props, history flags, and infinite-scroll metadata.
+- Rocket shared props with request-aware providers.
 
-Shared application state helpers, lazy or async prop resolvers, SSR, and non-Rocket framework integrations are planned but not fully implemented yet.
+Lazy or async prop resolvers, SSR, and non-Rocket framework integrations are planned but not fully implemented yet.
 
 The minimum supported Rust version is 1.88.
+
+## Protocol Support
+
+| Feature | Status | Notes |
+| --- | --- | --- |
+| Initial HTML response | Supported | Rocket renders the application shell through `VersionFairing`. |
+| JSON Inertia response | Supported | Responses include `X-Inertia: true` and `Vary: X-Inertia`. |
+| Asset version conflicts | Supported | Stale Inertia `GET` requests return `409 Conflict` with `X-Inertia-Location`. |
+| Dynamic asset versions | Supported | `VersionFairing::dynamic` reads the current version when page responses or version checks need it. |
+| Query-string URLs | Supported | Page object URLs preserve the request query string. |
+| Public header helpers | Supported | Header constants are available at the crate root and through `inertia_rs::headers`. |
+| Request header parsing | Supported | `RequestContext` is framework-neutral; Rocket exposes `InertiaHeaders`. |
+| Partial reloads | Supported | Matching components honor `X-Inertia-Partial-Data` and `X-Inertia-Partial-Except`. |
+| Merge props | Supported | `mergeProps`, `prependProps`, `deepMergeProps`, `matchPropsOn`, reset handling, and infinite-scroll intent are modeled. |
+| Deferred props | Partial | `deferredProps` metadata is emitted and values are omitted until requested, but prop values are still serialized eagerly. |
+| Lazy or async props | Planned | There is no lazy resolver container yet. |
+| Once props | Supported | `onceProps` metadata and `X-Inertia-Except-Once-Props` filtering are modeled. |
+| Shared props | Supported | Rocket managed state can merge common props into every page response. |
+| External location redirects | Supported | `Inertia::location` maps Inertia visits to `409 Conflict` with `X-Inertia-Location`. |
+| Method-aware redirects | Supported | `Inertia::redirect` returns `303 See Other` for write methods. |
+| SSR | Not supported | No server-side rendering bridge is provided. |
+| Axum | Planned | Framework expansion is deferred until the Rocket integration settles on the protocol core. |
 
 ## Installation
 
