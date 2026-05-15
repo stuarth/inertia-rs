@@ -2,20 +2,16 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use inertia_rs::axum::{InertiaError, InertiaRequest, VersionLayer};
-use inertia_rs::Inertia;
-
-#[derive(serde::Serialize)]
-struct Hello {
-    name: String,
-}
+use inertia_rs::{Inertia, InertiaProps};
 
 async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
     request.render(
         Inertia::response(
             "Hello",
-            Hello {
-                name: "world".into(),
-            },
+            InertiaProps::new()
+                .value("name", "world")
+                .defer("stats", || 1)
+                .optional("debug", || "partial"),
         ),
         |context| {
             Html(format!(

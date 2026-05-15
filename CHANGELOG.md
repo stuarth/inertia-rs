@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Rocket `SharedProps` managed state for common page props.
 - Initial Axum integration with `InertiaRequest`, `VersionLayer`, page response rendering, external locations, and method-aware redirects.
 - Minimal Axum example.
+- `InertiaProps` and `ScopedInertiaProps` for synchronous lazy, optional, deferred, and once prop resolvers.
 - README protocol support matrix.
 
 ### Changed

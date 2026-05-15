@@ -17,5 +17,15 @@ curl -H 'X-Inertia: true' -H 'X-Inertia-Version: asset-version-1' \
   http://127.0.0.1:3001/hello
 ```
 
+Deferred and optional props are resolved when a matching partial reload asks
+for them:
+
+```sh
+curl -H 'X-Inertia: true' -H 'X-Inertia-Version: asset-version-1' \
+  -H 'X-Inertia-Partial-Component: Hello' \
+  -H 'X-Inertia-Partial-Data: stats,debug' \
+  http://127.0.0.1:3001/hello
+```
+
 A stale or missing Inertia version returns `409 Conflict` with
 `X-Inertia-Location`.

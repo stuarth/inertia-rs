@@ -3,8 +3,8 @@
 //! Rocket integration for `inertia_rs`.
 
 use super::{
-    html_response_context, Inertia, Location, Redirect, RequestContext, VARY, X_INERTIA,
-    X_INERTIA_LOCATION,
+    html_response_context, Inertia, IntoPageProps, Location, Redirect, RequestContext, VARY,
+    X_INERTIA, X_INERTIA_LOCATION,
 };
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, uri::Reference, Method};
@@ -167,7 +167,7 @@ fn is_write_method(method: Method) -> bool {
     )
 }
 
-impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
+impl<'r, 'o: 'r, R: IntoPageProps> Responder<'r, 'o> for Inertia<R> {
     #[inline(always)]
     fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
         let url = self
@@ -389,9 +389,9 @@ impl Fairing for VersionFairing<'static> {
 mod tests {
     use super::*;
     use crate::{
-        ScrollProps, X_INERTIA_EXCEPT_ONCE_PROPS, X_INERTIA_INFINITE_SCROLL_MERGE_INTENT,
-        X_INERTIA_PARTIAL_COMPONENT, X_INERTIA_PARTIAL_DATA, X_INERTIA_PARTIAL_EXCEPT,
-        X_INERTIA_RESET, X_INERTIA_VERSION,
+        InertiaProps, ScrollProps, X_INERTIA_EXCEPT_ONCE_PROPS,
+        X_INERTIA_INFINITE_SCROLL_MERGE_INTENT, X_INERTIA_PARTIAL_COMPONENT,
+        X_INERTIA_PARTIAL_DATA, X_INERTIA_PARTIAL_EXCEPT, X_INERTIA_RESET, X_INERTIA_VERSION,
     };
     use rocket::{
         delete,
@@ -481,6 +481,17 @@ mod tests {
         .defer("stats")
         .once("plans")
         .share("users")
+    }
+
+    #[get("/lazy")]
+    fn lazy() -> Inertia<InertiaProps> {
+        Inertia::response(
+            "lazy",
+            InertiaProps::new()
+                .value("users", serde_json::json!(["Ada", "Grace"]))
+                .defer("stats", || 42)
+                .optional("audit", || serde_json::json!(["created"])),
+        )
     }
 
     #[rocket::post("/write")]
@@ -584,6 +595,7 @@ mod tests {
                     url_override,
                     unsafe_props,
                     advanced,
+                    lazy,
                     write,
                     scrolling,
                     external,
@@ -1092,6 +1104,48 @@ mod tests {
         assert_eq!(page["props"]["errors"], serde_json::json!({}));
         assert_eq!(page["props"]["users"], serde_json::json!(["Ada", "Grace"]));
         assert!(page["props"].get("stats").is_none());
+    }
+
+    #[test]
+    fn rocket_json_response_supports_lazy_props() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client
+            .get("/lazy")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::Ok);
+
+        let body = resp.into_string().unwrap();
+        let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(page["props"]["users"], serde_json::json!(["Ada", "Grace"]));
+        assert!(page["props"].get("stats").is_none());
+        assert!(page["props"].get("audit").is_none());
+        assert_eq!(
+            page["deferredProps"],
+            serde_json::json!({ "default": ["stats"] })
+        );
+
+        let resp = client
+            .get("/lazy")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION))
+            .header(Header::new(X_INERTIA_PARTIAL_COMPONENT, "lazy"))
+            .header(Header::new(X_INERTIA_PARTIAL_DATA, "stats,audit"))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::Ok);
+
+        let body = resp.into_string().unwrap();
+        let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(page["props"]["stats"], 42);
+        assert_eq!(page["props"]["audit"], serde_json::json!(["created"]));
+        assert!(page["props"].get("users").is_none());
+        assert!(page.get("deferredProps").is_none());
     }
 
     #[test]

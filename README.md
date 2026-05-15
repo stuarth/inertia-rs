@@ -17,10 +17,11 @@ Inertia lets you build server-driven applications that render client-side pages 
 - Asset version checks with `X-Inertia-Version`.
 - `409 Conflict` responses with `X-Inertia-Location` for stale assets.
 - Inertia v3 page-object metadata and response filtering for partial reloads, merge props, deferred prop keys, once props, history flags, and infinite-scroll metadata.
+- Framework-neutral `InertiaProps` for synchronous lazy, optional, deferred, and once prop resolvers.
 - Rocket shared props with request-aware providers.
 - Axum request extraction, response helpers, and asset-version middleware.
 
-Lazy or async prop resolvers, SSR, and full shared-prop support outside Rocket are planned but not fully implemented yet.
+Async prop resolvers, SSR, and full shared-prop support outside Rocket are planned but not fully implemented yet.
 
 The minimum supported Rust version is 1.88.
 
@@ -37,8 +38,8 @@ The minimum supported Rust version is 1.88.
 | Request header parsing | Supported | `RequestContext` is framework-neutral; Rocket exposes `InertiaHeaders`. |
 | Partial reloads | Supported | Matching components honor `X-Inertia-Partial-Data` and `X-Inertia-Partial-Except`. |
 | Merge props | Supported | `mergeProps`, `prependProps`, `deepMergeProps`, `matchPropsOn`, reset handling, and infinite-scroll intent are modeled. |
-| Deferred props | Partial | `deferredProps` metadata is emitted and values are omitted until requested, but prop values are still serialized eagerly. |
-| Lazy or async props | Planned | There is no lazy resolver container yet. |
+| Deferred props | Partial | `InertiaProps::defer` emits `deferredProps` metadata and resolves synchronous values only when requested. Async deferred resolvers are planned. |
+| Lazy or async props | Partial | `InertiaProps` supports synchronous lazy, optional, always, deferred, and once props. Async resolvers are planned. |
 | Once props | Supported | `onceProps` metadata and `X-Inertia-Except-Once-Props` filtering are modeled. |
 | Shared props | Supported | Rocket managed state can merge common props into every page response. |
 | External location redirects | Supported | `Inertia::location` maps Inertia visits to `409 Conflict` with `X-Inertia-Location`. |
@@ -185,7 +186,7 @@ The simple API remains the shortest path for standard pages:
 Inertia::response("Users/Index", props)
 ```
 
-For v3 page metadata, chain explicit helpers on the response or use the `Inertia::page(...).props(...)` builder. Deferred props are listed in `deferredProps` and omitted until an Inertia partial reload explicitly requests them; this crate does not yet provide lazy async prop resolvers. `share()` marks `sharedProps` metadata, while the Rocket integration can register shared application state as shown below.
+For v3 page metadata, chain explicit helpers on the response or use the `Inertia::page(...).props(...)` builder. Deferred props are listed in `deferredProps` and omitted until an Inertia partial reload explicitly requests them. When props are ordinary serializable values, they are serialized before filtering. Use `InertiaProps` when expensive synchronous values should only be resolved after the request headers determine they are needed. `share()` marks `sharedProps` metadata, while the Rocket integration can register shared application state as shown below.
 
 ```rust
 Inertia::response("Users/Index", props)
@@ -202,6 +203,22 @@ Inertia::page("Users/Index")
     .defer("stats")
     .props(props)
 ```
+
+```rust
+use inertia_rs::{Inertia, InertiaProps};
+
+let props = InertiaProps::new()
+    .value("user", user)
+    .lazy("companies", || load_companies())
+    .optional("auditTrail", || load_audit_trail())
+    .defer("analytics", || load_analytics())
+    .once("plans", || load_plans());
+
+Inertia::response("Users/Index", props)
+```
+
+For immediate rendering paths that borrow local values, use
+`ScopedInertiaProps`.
 
 The root crate also exposes framework-neutral protocol types:
 

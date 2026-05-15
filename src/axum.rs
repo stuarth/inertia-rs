@@ -1,8 +1,8 @@
 //! Axum integration for `inertia_rs`.
 
 use super::{
-    html_response_context, Inertia, Location, Redirect, RequestContext, VARY, X_INERTIA,
-    X_INERTIA_LOCATION,
+    html_response_context, Inertia, IntoPageProps, Location, Redirect, RequestContext, VARY,
+    X_INERTIA, X_INERTIA_LOCATION,
 };
 use ::axum::extract::{FromRequestParts, OriginalUri};
 use ::axum::http::header::{InvalidHeaderValue, LOCATION};
@@ -12,7 +12,6 @@ use ::axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
 use ::axum::response::{IntoResponse, Response};
 use ::axum::Json;
 use fluent_uri::{ParseError, UriRef};
-use serde::Serialize;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt;
@@ -215,7 +214,7 @@ impl InertiaRequest {
         html_response: F,
     ) -> Result<Response, InertiaError>
     where
-        T: Serialize,
+        T: IntoPageProps,
         F: FnOnce(HtmlResponseContext) -> R,
         R: IntoResponse,
     {
@@ -389,8 +388,8 @@ where
 mod tests {
     use super::*;
     use crate::{
-        X_INERTIA_EXCEPT_ONCE_PROPS, X_INERTIA_PARTIAL_COMPONENT, X_INERTIA_PARTIAL_DATA,
-        X_INERTIA_VERSION,
+        InertiaProps, X_INERTIA_EXCEPT_ONCE_PROPS, X_INERTIA_PARTIAL_COMPONENT,
+        X_INERTIA_PARTIAL_DATA, X_INERTIA_VERSION,
     };
     use ::axum::body::Body;
     use ::axum::http::header::CONTENT_TYPE;
@@ -398,6 +397,7 @@ mod tests {
     use ::axum::response::Html;
     use ::axum::routing::get;
     use ::axum::Router;
+    use serde::Serialize;
     use serde_json::json;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
@@ -470,6 +470,19 @@ mod tests {
         )
     }
 
+    async fn lazy_page(request: InertiaRequest) -> Result<Response, InertiaError> {
+        request.render(
+            Inertia::response(
+                "lazy",
+                InertiaProps::new()
+                    .value("users", json!(["Ada", "Grace"]))
+                    .defer("stats", || 7)
+                    .optional("audit", || json!(["created"])),
+            ),
+            |context| Html(context.data_page().to_owned()),
+        )
+    }
+
     async fn unsafe_page(request: InertiaRequest) -> Result<Response, InertiaError> {
         request.render(
             Inertia::response(
@@ -516,6 +529,7 @@ mod tests {
             .route("/foo", get(page).post(page))
             .route("/custom-url", get(custom_url))
             .route("/builder", get(builder_page))
+            .route("/lazy", get(lazy_page))
             .route("/unsafe", get(unsafe_page))
             .route("/external", get(external).post(external))
             .route("/relative-external", get(relative_location))
@@ -738,6 +752,53 @@ mod tests {
 
         assert_eq!(page["component"], "builder");
         assert_eq!(page["mergeProps"], json!(["notifications"]));
+    }
+
+    #[tokio::test]
+    async fn render_supports_lazy_props() {
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/lazy")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["users"], json!(["Ada", "Grace"]));
+        assert!(page["props"].get("stats").is_none());
+        assert!(page["props"].get("audit").is_none());
+        assert_eq!(page["deferredProps"], json!({ "default": ["stats"] }));
+
+        let response = app()
+            .oneshot(
+                Request::builder()
+                    .uri("/lazy")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .header(X_INERTIA_PARTIAL_COMPONENT, "lazy")
+                    .header(X_INERTIA_PARTIAL_DATA, "stats,audit")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["stats"], 7);
+        assert_eq!(page["props"]["audit"], json!(["created"]));
+        assert!(page["props"].get("users").is_none());
+        assert!(page.get("deferredProps").is_none());
     }
 
     #[tokio::test]
