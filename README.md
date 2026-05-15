@@ -75,6 +75,26 @@ fn rocket() -> _ {
 }
 ```
 
+Use `VersionFairing::dynamic` when the asset version should be loaded or
+computed while the server is running. The provider runs during request
+handling, so keep it fast and avoid blocking I/O; load files or manifests
+outside the provider and read a cached value here.
+
+```rust
+let asset_version = std::sync::Arc::new(std::sync::RwLock::new(String::from("asset-version-1")));
+let version_for_requests = asset_version.clone();
+
+let fairing = VersionFairing::dynamic(
+    move || {
+        version_for_requests
+            .read()
+            .map(|version| version.clone())
+            .unwrap_or_default()
+    },
+    |request, ctx| Template::render("app", ctx).respond_to(request),
+);
+```
+
 Your root HTML template receives `data_page`, a JSON-serialized Inertia page object escaped for safe use in a `<script>` tag. With Handlebars, the template can expose it to the frontend app like this. The `script_path` value below is an application-level value, typically read from a Vite manifest.
 
 ```html

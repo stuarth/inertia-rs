@@ -22,6 +22,7 @@ type SharedPropProvider = Arc<
         + Send
         + Sync,
 >;
+type VersionProvider = Arc<dyn Fn() -> String + Send + Sync>;
 
 fn request_context(request: &Request<'_>) -> RequestContext {
     RequestContext::from_header_fn(|name| request.headers().get_one(name))
@@ -172,6 +173,8 @@ fn serialize_page_for_html<T: Serialize>(page: &T) -> Result<String, http::Statu
 #[derive(Clone)]
 struct InertiaVersion(String);
 
+struct VersionProviderFn(VersionProvider);
+
 fn add_vary_header<'r>(response: Response<'r>) -> Response<'r> {
     Response::build_from(response)
         .raw_header_adjoin(VARY, X_INERTIA)
@@ -201,8 +204,12 @@ impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
             .url()
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| request.uri().to_string());
+        let version_provider = request
+            .rocket()
+            .state::<VersionProviderFn>()
+            .map(|provider| provider.0.clone());
         let version = request
-            .local_cache(|| None::<InertiaVersion>)
+            .local_cache(|| version_provider.map(|provider| InertiaVersion(provider())))
             .clone()
             .map(|version| version.0);
         let context = if request.method() == Method::Get {
@@ -286,7 +293,7 @@ impl<'r, 'o: 'r> Responder<'r, 'o> for Redirect {
 /// stale Inertia `GET` requests by returning `409 Conflict`, and registers the
 /// HTML response callback used for first-page loads.
 pub struct VersionFairing<'resp> {
-    version: String,
+    version_provider: VersionProvider,
     html_response:
         Arc<dyn Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp> + Send + Sync>,
 }
@@ -300,8 +307,30 @@ impl<'resp> VersionFairing<'resp> {
             + Sync
             + 'static,
     {
+        let version = version.into();
+
+        Self::dynamic(move || version.clone(), html_response)
+    }
+
+    /// Creates a fairing with a dynamic asset-version provider and HTML renderer.
+    ///
+    /// The provider is called when a page response or Inertia version check
+    /// needs the current version. Its value is included in successful page
+    /// objects and compared with `X-Inertia-Version` for Inertia `GET`
+    /// requests. Keep the provider fast and non-blocking; if the version is
+    /// loaded from disk or another external source, cache it in application
+    /// state and read the cached value here.
+    pub fn dynamic<F, H, V>(version_provider: F, html_response: H) -> Self
+    where
+        F: Fn() -> V + Send + Sync + 'static,
+        H: Fn(&Request<'_>, &HtmlResponseContext) -> response::Result<'resp>
+            + Send
+            + Sync
+            + 'static,
+        V: Into<String>,
+    {
         Self {
-            version: version.into(),
+            version_provider: Arc::new(move || version_provider().into()),
             html_response: Arc::new(html_response),
         }
     }
@@ -352,24 +381,28 @@ impl Fairing for VersionFairing<'static> {
     async fn on_ignite(&self, rocket: rocket::Rocket<rocket::Build>) -> rocket::fairing::Result {
         Ok(rocket
             .mount(BASE_ROUTE, routes![version_conflict])
+            .manage(VersionProviderFn(self.version_provider.clone()))
             .manage(ResponderFn(self.html_response.clone())))
     }
 
     async fn on_request(&self, request: &mut Request<'_>, _: &mut Data<'_>) {
-        request.local_cache(|| Some(InertiaVersion(self.version.clone())));
-
         let context = request_context(request);
 
         if request.method() == Method::Get && context.is_inertia() {
+            let version = request
+                .local_cache(|| Some(InertiaVersion((self.version_provider)())))
+                .clone()
+                .expect("version fairing caches a version for Inertia GET requests")
+                .0;
             let request_version = context.version();
 
             trace!(
                 "request version {:?} / asset version {}",
                 request_version,
-                &self.version
+                &version
             );
 
-            if request_version != Some(self.version.as_str()) {
+            if request_version != Some(version.as_str()) {
                 let uri = uri!(
                     "/inertia-rs",
                     version_conflict(location = request.uri().to_string())
@@ -396,6 +429,10 @@ mod tests {
         http::{Header, Status},
         local::blocking::Client,
         patch, post, put,
+    };
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     #[derive(Serialize)]
@@ -609,6 +646,15 @@ mod tests {
         )
     }
 
+    fn rocket_with_dynamic_version(version: Arc<AtomicUsize>) -> rocket::Rocket<rocket::Build> {
+        rocket::build()
+            .mount("/", routes![foo])
+            .attach(VersionFairing::dynamic(
+                move || format!("dynamic-{}", version.load(Ordering::SeqCst)),
+                |request, ctx| serde_json::to_string(ctx).unwrap().respond_to(request),
+            ))
+    }
+
     fn rocket_without_fairing() -> rocket::Rocket<rocket::Build> {
         rocket::build().mount("/", routes![foo, headers])
     }
@@ -667,6 +713,41 @@ mod tests {
         let page: serde_json::Value = serde_json::from_str(&body).unwrap();
 
         assert!(page.get("version").is_none());
+    }
+
+    #[test]
+    fn dynamic_version_is_resolved_for_page_responses() {
+        let version = Arc::new(AtomicUsize::new(1));
+        let client = Client::tracked(rocket_with_dynamic_version(version.clone())).unwrap();
+
+        version.store(2, Ordering::SeqCst);
+
+        let resp = client
+            .get("/foo")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, "dynamic-2"))
+            .dispatch();
+        let body = resp.into_string().unwrap();
+        let page: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+        assert_eq!(page["version"], "dynamic-2");
+    }
+
+    #[test]
+    fn dynamic_version_is_used_for_conflict_checks() {
+        let version = Arc::new(AtomicUsize::new(1));
+        let client = Client::tracked(rocket_with_dynamic_version(version.clone())).unwrap();
+
+        version.store(3, Ordering::SeqCst);
+
+        let resp = client
+            .get("/foo")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, "dynamic-2"))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::Conflict);
+        assert_eq!(resp.headers().get_one(X_INERTIA_LOCATION), Some("/foo"));
     }
 
     #[test]
