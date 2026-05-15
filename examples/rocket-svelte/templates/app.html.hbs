@@ -2,10 +2,14 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    {{#if style_path}}
+      <link rel="stylesheet" href="/public/build/{{ style_path }}" />
+    {{/if}}
+    <script type="module" src="/public/build/{{ script_path }}"></script>
   </head>
   <body>
-    <div id="app" data-page='{{ data_page }}'></div>
-    <script src="/public/build/bundle.js"></script>
+    <script data-page="app" type="application/json">{{{ data_page }}}</script>
+    <div id="app"></div>
   </body>
 </html>

@@ -1,7 +1,8 @@
 [package]
 name = "inertia_rs"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
+rust-version = "1.88"
 license = "MIT"
 homepage = "https://github.com/stuarth/inertia-rs"
 repository = "https://github.com/stuarth/inertia-rs"
@@ -20,3 +21,6 @@ tracing = "0.1"
 
 [features]
 default = ["rocket"]
+
+[package.metadata.docs.rs]
+all-features = true

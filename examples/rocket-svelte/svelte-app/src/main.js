@@ -1,8 +1,8 @@
-import { createInertiaApp } from '@inertiajs/inertia-svelte'
+import { createInertiaApp } from '@inertiajs/svelte'
+import './global.css'
+
+const pages = import.meta.glob('./Pages/**/*.svelte', { eager: true })
 
 createInertiaApp({
-  resolve: name => require(`./Pages/${name}.svelte`),
-  setup({ el, App, props }) {
-    new App({ target: el, props })
-  },
+  resolve: name => pages[`./Pages/${name}.svelte`],
 })
