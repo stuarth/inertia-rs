@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tower_http::services::ServeDir;
 
 #[derive(Clone, Debug)]
@@ -61,6 +62,21 @@ fn load_assets() -> Assets {
     }
 }
 
+fn generated_at() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time is after the Unix epoch")
+        .as_secs()
+}
+
+fn example_stats(adapter: &'static str) -> serde_json::Value {
+    serde_json::json!({
+        "adapter": adapter,
+        "deferred": true,
+        "generatedAt": generated_at(),
+    })
+}
+
 async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
     // InertiaRequest keeps extension snapshots for shared-prop providers, so
     // this example registers SharedProps even though the assets are separate.
@@ -74,8 +90,17 @@ async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
             "Hello",
             InertiaProps::new()
                 .value("name", "world")
-                .defer("stats", || 42)
-                .optional("debug", || "partial"),
+                .value(
+                    "message",
+                    "Rendered by Axum and hydrated by Svelte through Inertia.",
+                )
+                .defer("stats", || example_stats("Axum"))
+                .optional("debug", || {
+                    serde_json::json!({
+                        "partialReload": true,
+                        "loadedBy": "X-Inertia-Partial-Data: debug",
+                    })
+                }),
         ),
         |context| {
             let style = assets.style_path.as_deref().map_or_else(String::new, |path| {
@@ -112,7 +137,17 @@ async fn main() {
     let app = Router::new()
         .route("/hello", get(hello))
         .nest_service("/public", ServeDir::new(public_dir))
-        .layer(Extension(SharedProps::new().value("appName", "Axum Svelte")))
+        .layer(Extension(
+            SharedProps::new()
+                .value("appName", "Axum Svelte")
+                .value(
+                    "auth.user",
+                    serde_json::json!({
+                        "name": "Grace Hopper",
+                        "role": "Example user",
+                    }),
+                ),
+        ))
         .layer(Extension(assets.clone()))
         .layer(VersionLayer::new(assets.version.clone()));
 

@@ -1,16 +1,15 @@
 #[macro_use]
 extern crate rocket;
 
-use inertia_rs::{rocket::VersionFairing, Inertia};
+use inertia_rs::{
+    rocket::{SharedProps, VersionFairing},
+    Inertia, InertiaProps,
+};
 use rocket::fs::FileServer;
 use rocket::response::Responder;
 use rocket_dyn_templates::Template;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::BTreeMap, fs};
-
-#[derive(serde::Serialize)]
-struct Hello {
-    name: String,
-}
 
 #[derive(serde::Deserialize)]
 struct ViteManifestEntry {
@@ -49,13 +48,38 @@ fn vite_manifest_entry() -> ViteManifestEntry {
         .expect("Vite manifest does not contain the src/main.js entrypoint")
 }
 
+fn generated_at() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time is after the Unix epoch")
+        .as_secs()
+}
+
+fn example_stats(adapter: &'static str) -> serde_json::Value {
+    serde_json::json!({
+        "adapter": adapter,
+        "deferred": true,
+        "generatedAt": generated_at(),
+    })
+}
+
 #[get("/hello")]
-fn hello() -> Inertia<Hello> {
+fn hello() -> Inertia<InertiaProps> {
     Inertia::response(
         "Hello",
-        Hello {
-            name: "world".into(),
-        },
+        InertiaProps::new()
+            .value("name", "world")
+            .value(
+                "message",
+                "Rendered by Rocket and hydrated by Svelte through Inertia.",
+            )
+            .defer("stats", || example_stats("Rocket"))
+            .optional("debug", || {
+                serde_json::json!({
+                    "partialReload": true,
+                    "loadedBy": "X-Inertia-Partial-Data: debug",
+                })
+            }),
     )
 }
 
@@ -70,6 +94,17 @@ fn rocket() -> _ {
         rocket::Config::figment().merge(("template_dir", rocket::fs::relative!("templates")));
 
     rocket::custom(figment)
+        .manage(
+            SharedProps::new()
+                .value("appName", "Rocket Svelte")
+                .value(
+                    "auth.user",
+                    serde_json::json!({
+                        "name": "Ada Lovelace",
+                        "role": "Example user",
+                    }),
+                ),
+        )
         .mount("/", routes![hello])
         .attach(Template::fairing())
         .mount("/public", FileServer::from(rocket::fs::relative!("public")))

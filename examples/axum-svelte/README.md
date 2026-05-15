@@ -2,12 +2,18 @@
 
 Small Axum + Svelte 5 + Inertia example.
 
+The page demonstrates shared props, deferred props, optional props, and partial
+reloads from the Svelte client.
+
 ## Build Frontend Assets
 
+From the repository root:
+
 ```sh
-cd svelte-app
+cd examples/axum-svelte/svelte-app
 npm install
 npm run build
+cd ../../..
 ```
 
 ## Start The Server
