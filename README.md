@@ -18,7 +18,7 @@ Inertia lets you build server-driven applications that render client-side pages 
 - `409 Conflict` responses with `X-Inertia-Location` for stale assets.
 - Inertia v3 page-object metadata and response filtering for partial reloads, merge props, deferred prop keys, once props, history flags, and infinite-scroll metadata.
 
-Shared application state helpers, redirect helpers, lazy or async prop resolvers, SSR, and non-Rocket framework integrations are planned but not fully implemented yet.
+Shared application state helpers, lazy or async prop resolvers, SSR, and non-Rocket framework integrations are planned but not fully implemented yet.
 
 The minimum supported Rust version is 1.88.
 
@@ -127,6 +127,26 @@ use inertia_rs::{Page, PageMetadata, RequestContext};
 ```
 
 Rocket responses use these types internally. `RequestContext` parses Inertia headers such as `X-Inertia-Partial-Data`, `X-Inertia-Partial-Except`, `X-Inertia-Reset`, and `X-Inertia-Except-Once-Props`.
+
+## Redirect Helpers
+
+Use `Inertia::location(url)` for external redirects from Inertia visits. Rocket converts Inertia requests to the `409 Conflict` response with `X-Inertia-Location`, and falls back to method-aware normal redirects for direct browser requests.
+
+```rust
+#[get("/billing")]
+fn billing() -> inertia_rs::Location {
+    Inertia::location("https://billing.example.com")
+}
+```
+
+Use `Inertia::redirect(url)` for application redirects that should be method-aware. Rocket returns `302 Found` for read-style requests and `303 See Other` for `POST`, `PUT`, `PATCH`, and `DELETE`; this helper does not branch on Inertia request headers.
+
+```rust
+#[post("/users")]
+fn create_user() -> inertia_rs::Redirect {
+    Inertia::redirect("/users")
+}
+```
 
 ## Request Helpers
 

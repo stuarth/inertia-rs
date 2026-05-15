@@ -2,11 +2,11 @@
 
 //! Rocket integration for `inertia_rs`.
 
-use super::{Inertia, RequestContext, VARY, X_INERTIA, X_INERTIA_LOCATION};
+use super::{Inertia, Location, Redirect, RequestContext, VARY, X_INERTIA, X_INERTIA_LOCATION};
 use rocket::fairing::{Fairing, Info, Kind};
-use rocket::http::{self, Method};
+use rocket::http::{self, uri::Reference, Method};
 use rocket::request::{FromRequest, Outcome, Request};
-use rocket::response::{self, Responder, Response};
+use rocket::response::{self, Redirect as RocketRedirect, Responder, Response};
 use rocket::serde::json::Json;
 use rocket::Data;
 use rocket::{error, get, routes, uri};
@@ -100,6 +100,22 @@ fn add_vary_header<'r>(response: Response<'r>) -> Response<'r> {
         .finalize()
 }
 
+fn validated_uri_reference(url: String) -> Result<String, http::Status> {
+    let uri: Reference<'static> = url.try_into().map_err(|_e| {
+        error!("Invalid URI used for redirect.");
+        http::Status::InternalServerError
+    })?;
+
+    Ok(uri.to_string())
+}
+
+fn is_write_method(method: Method) -> bool {
+    matches!(
+        method,
+        Method::Post | Method::Put | Method::Patch | Method::Delete
+    )
+}
+
 impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
     #[inline(always)]
     fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
@@ -138,6 +154,42 @@ impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
                     http::Status::InternalServerError.respond_to(request)
                 }
             }
+        }
+    }
+}
+
+impl<'r, 'o: 'r> Responder<'r, 'o> for Location {
+    #[inline(always)]
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+        let url = validated_uri_reference(self.url)?;
+
+        if request_context(request).is_inertia() {
+            Response::build()
+                .status(http::Status::Conflict)
+                .raw_header(X_INERTIA_LOCATION, url)
+                .raw_header_adjoin(VARY, X_INERTIA)
+                .ok()
+        } else if is_write_method(request.method()) {
+            RocketRedirect::to(url)
+                .respond_to(request)
+                .map(add_vary_header)
+        } else {
+            RocketRedirect::found(url)
+                .respond_to(request)
+                .map(add_vary_header)
+        }
+    }
+}
+
+impl<'r, 'o: 'r> Responder<'r, 'o> for Redirect {
+    #[inline(always)]
+    fn respond_to(self, request: &'r Request<'_>) -> response::Result<'o> {
+        let url = validated_uri_reference(self.url)?;
+
+        if is_write_method(request.method()) {
+            RocketRedirect::to(url).respond_to(request)
+        } else {
+            RocketRedirect::found(url).respond_to(request)
         }
     }
 }
@@ -254,8 +306,10 @@ mod tests {
         X_INERTIA_RESET, X_INERTIA_VERSION,
     };
     use rocket::{
+        delete,
         http::{Header, Status},
         local::blocking::Client,
+        patch, post, put,
     };
 
     #[derive(Serialize)]
@@ -343,6 +397,51 @@ mod tests {
             }))
     }
 
+    #[get("/external")]
+    fn external() -> Location {
+        Inertia::location("https://example.com/outside")
+    }
+
+    #[post("/external")]
+    fn external_post() -> Location {
+        Inertia::location("https://example.com/outside")
+    }
+
+    #[get("/bad-external")]
+    fn bad_external() -> Location {
+        Inertia::location("/bad\nlocation")
+    }
+
+    #[get("/go")]
+    fn get_redirect() -> Redirect {
+        Inertia::redirect("/target")
+    }
+
+    #[get("/bad-go")]
+    fn bad_redirect() -> Redirect {
+        Inertia::redirect("/bad\nlocation")
+    }
+
+    #[post("/go")]
+    fn post_redirect() -> Redirect {
+        Inertia::redirect("/target")
+    }
+
+    #[put("/go")]
+    fn put_redirect() -> Redirect {
+        Inertia::redirect("/target")
+    }
+
+    #[patch("/go")]
+    fn patch_redirect() -> Redirect {
+        Inertia::redirect("/target")
+    }
+
+    #[delete("/go")]
+    fn delete_redirect() -> Redirect {
+        Inertia::redirect("/target")
+    }
+
     #[get("/headers")]
     fn headers(headers: InertiaHeaders) -> String {
         format!(
@@ -374,6 +473,15 @@ mod tests {
                     advanced,
                     write,
                     scrolling,
+                    external,
+                    external_post,
+                    bad_external,
+                    get_redirect,
+                    bad_redirect,
+                    post_redirect,
+                    put_redirect,
+                    patch_redirect,
+                    delete_redirect,
                     headers
                 ],
             )
@@ -543,6 +651,20 @@ mod tests {
         assert_eq!(
             resp.headers().get_one(X_INERTIA_LOCATION),
             Some("/foo?bar=baz")
+        );
+        assert_eq!(resp.headers().get_one(VARY), Some(X_INERTIA));
+    }
+
+    #[test]
+    fn external_location_response_uses_see_other_for_direct_write_requests() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client.post("/external").dispatch();
+
+        assert_eq!(resp.status(), Status::SeeOther);
+        assert_eq!(
+            resp.headers().get_one("Location"),
+            Some("https://example.com/outside")
         );
         assert_eq!(resp.headers().get_one(VARY), Some(X_INERTIA));
     }
@@ -870,6 +992,110 @@ mod tests {
             page["onceProps"]["plans"],
             serde_json::json!({ "prop": "plans", "expiresAt": null })
         );
+    }
+
+    #[test]
+    fn external_location_response_uses_inertia_conflict_header_for_inertia_requests() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client
+            .get("/external")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::Conflict);
+        assert_eq!(
+            resp.headers().get_one(X_INERTIA_LOCATION),
+            Some("https://example.com/outside")
+        );
+        assert_eq!(resp.headers().get_one(VARY), Some(X_INERTIA));
+    }
+
+    #[test]
+    fn external_location_response_falls_back_to_normal_redirect_for_direct_requests() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client.get("/external").dispatch();
+
+        assert_eq!(resp.status(), Status::Found);
+        assert_eq!(
+            resp.headers().get_one("Location"),
+            Some("https://example.com/outside")
+        );
+        assert_eq!(resp.headers().get_one(VARY), Some(X_INERTIA));
+    }
+
+    #[test]
+    fn stale_version_location_route_conflicts_before_falling_back_to_direct_redirect() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client
+            .get("/external")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, "stale"))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::Conflict);
+        assert_eq!(
+            resp.headers().get_one(X_INERTIA_LOCATION),
+            Some("/external")
+        );
+    }
+
+    #[test]
+    fn external_location_response_rejects_invalid_uri_references() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client
+            .get("/bad-external")
+            .header(Header::new(X_INERTIA, "true"))
+            .header(Header::new(X_INERTIA_VERSION, CURRENT_VERSION))
+            .dispatch();
+
+        assert_eq!(resp.status(), Status::InternalServerError);
+        assert_eq!(resp.headers().get_one(X_INERTIA_LOCATION), None);
+    }
+
+    #[test]
+    fn get_redirect_uses_found_status() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client.get("/go").dispatch();
+
+        assert_eq!(resp.status(), Status::Found);
+        assert_eq!(resp.headers().get_one("Location"), Some("/target"));
+    }
+
+    #[test]
+    fn write_redirects_use_see_other_status() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client.post("/go").dispatch();
+        assert_eq!(resp.status(), Status::SeeOther);
+        assert_eq!(resp.headers().get_one("Location"), Some("/target"));
+
+        let resp = client.put("/go").dispatch();
+        assert_eq!(resp.status(), Status::SeeOther);
+        assert_eq!(resp.headers().get_one("Location"), Some("/target"));
+
+        let resp = client.patch("/go").dispatch();
+        assert_eq!(resp.status(), Status::SeeOther);
+        assert_eq!(resp.headers().get_one("Location"), Some("/target"));
+
+        let resp = client.delete("/go").dispatch();
+        assert_eq!(resp.status(), Status::SeeOther);
+        assert_eq!(resp.headers().get_one("Location"), Some("/target"));
+    }
+
+    #[test]
+    fn redirect_response_rejects_invalid_uri_references() {
+        let client = Client::tracked(rocket()).unwrap();
+
+        let resp = client.get("/bad-go").dispatch();
+
+        assert_eq!(resp.status(), Status::InternalServerError);
+        assert_eq!(resp.headers().get_one("Location"), None);
     }
 
     #[test]

@@ -945,6 +945,58 @@ impl Inertia<()> {
             metadata: PageMetadata::new(),
         }
     }
+
+    /// Creates an external redirect response.
+    ///
+    /// Framework integrations should convert this into a `409 Conflict`
+    /// response with the destination URL in the `X-Inertia-Location` header.
+    pub fn location<U: Into<String>>(url: U) -> Location {
+        Location::new(url)
+    }
+
+    /// Creates a method-aware redirect response.
+    ///
+    /// Framework integrations should use `303 See Other` for write-method
+    /// requests so the follow-up request is a `GET`.
+    pub fn redirect<U: Into<String>>(url: U) -> Redirect {
+        Redirect::new(url)
+    }
+}
+
+/// A server-initiated external location visit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Location {
+    url: String,
+}
+
+impl Location {
+    /// Creates an external location redirect to `url`.
+    pub fn new<U: Into<String>>(url: U) -> Self {
+        Self { url: url.into() }
+    }
+
+    /// Returns the destination URL.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+/// A method-aware redirect response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Redirect {
+    url: String,
+}
+
+impl Redirect {
+    /// Creates a redirect response to `url`.
+    pub fn new<U: Into<String>>(url: U) -> Self {
+        Self { url: url.into() }
+    }
+
+    /// Returns the redirect destination URL.
+    pub fn url(&self) -> &str {
+        &self.url
+    }
 }
 
 /// A framework-neutral Inertia page response.
