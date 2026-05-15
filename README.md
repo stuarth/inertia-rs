@@ -66,7 +66,7 @@ For Axum applications, enable the `axum` feature instead:
 ```toml
 [dependencies]
 inertia_rs = { version = "0.3.0", default-features = false, features = ["axum"] }
-axum = "0.8"
+axum = "0.8.9"
 ```
 
 ## Rocket Usage

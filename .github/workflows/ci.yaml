@@ -15,6 +15,8 @@ jobs:
       - run: cargo clippy --all-features --all-targets -- -D warnings
       - run: cargo test --all-features
       - run: cargo check --no-default-features
+      - run: cargo check --no-default-features --features rocket
+      - run: cargo check --no-default-features --features axum
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-default-features --no-deps
 
@@ -26,6 +28,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - run: cargo check --all-features
       - run: cargo check --no-default-features
+      - run: cargo check --no-default-features --features rocket
+      - run: cargo check --no-default-features --features axum
 
   example:
     name: Example
