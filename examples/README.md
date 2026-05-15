@@ -4,6 +4,11 @@
 
   Demonstration of Rocket + Svelte. See the project's README for details.
 
+* **[`rocket-minimal`](./rocket-minimal)**
+
+  Minimal Rocket integration example with inline HTML and JSON Inertia
+  responses.
+
 * **[`axum-minimal`](./axum-minimal)**
 
   Minimal Axum integration example with HTML and JSON Inertia responses.
