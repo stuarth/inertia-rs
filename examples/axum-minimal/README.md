@@ -10,6 +10,8 @@ cargo run --manifest-path examples/Cargo.toml -p axum-minimal
 
 Open `http://127.0.0.1:3001/hello` for the HTML first-page response.
 
+The example also registers an Axum shared prop with `SharedProps`.
+
 An Inertia request with the matching asset version returns JSON:
 
 ```sh

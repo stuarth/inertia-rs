@@ -1,7 +1,8 @@
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
+use axum::Extension;
 use axum::Router;
-use inertia_rs::axum::{InertiaError, InertiaRequest, VersionLayer};
+use inertia_rs::axum::{InertiaError, InertiaRequest, SharedProps, VersionLayer};
 use inertia_rs::{Inertia, InertiaProps};
 
 async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
@@ -37,6 +38,7 @@ async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
 async fn main() {
     let app = Router::new()
         .route("/hello", get(hello))
+        .layer(Extension(SharedProps::new().value("appName", "Axum Demo")))
         .layer(VersionLayer::new("asset-version-1"));
     let addr = std::env::var("ADDR").unwrap_or_else(|_| "127.0.0.1:3001".to_owned());
     let listener = tokio::net::TcpListener::bind(&addr)

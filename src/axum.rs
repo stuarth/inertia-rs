@@ -1,17 +1,19 @@
 //! Axum integration for `inertia_rs`.
 
 use super::{
-    html_response_context, Inertia, IntoPageProps, Location, Redirect, RequestContext, VARY,
+    html_response_context, Inertia, IntoPageProps, Location, Page, Redirect, RequestContext, VARY,
     X_INERTIA, X_INERTIA_LOCATION,
 };
 use ::axum::extract::{FromRequestParts, OriginalUri};
 use ::axum::http::header::{InvalidHeaderValue, LOCATION};
 use ::axum::http::request::Parts;
 use ::axum::http::uri::Uri;
-use ::axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode};
+use ::axum::http::{Extensions, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use ::axum::response::{IntoResponse, Response};
 use ::axum::Json;
 use fluent_uri::{ParseError, UriRef};
+use serde::Serialize;
+use serde_json::Value;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt;
@@ -24,6 +26,8 @@ use tracing::error;
 
 pub use super::HtmlResponseContext;
 
+type SharedPropProvider =
+    Arc<dyn Fn(&InertiaRequest) -> Result<Option<Value>, serde_json::Error> + Send + Sync>;
 type VersionProvider = Arc<dyn Fn() -> String + Send + Sync>;
 type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
@@ -170,17 +174,135 @@ impl InertiaVersion {
     }
 }
 
+/// Shared Inertia props resolved for every Axum page response.
+///
+/// Register this as an Axum extension layer with [`axum::Extension`]. Shared
+/// props are shallow-merged into page props; route props win on key collisions.
+/// Providers run once per page response and may inspect the extracted
+/// [`InertiaRequest`]. Dotted keys, such as `auth.user`, are expanded into
+/// nested props.
+///
+/// Shared props are merged after partial-reload filtering, so they remain
+/// present on partial responses even when omitted from `only` or `except`
+/// reload options.
+///
+/// ```rust,no_run
+/// use axum::{Extension, Router};
+/// use inertia_rs::axum::{SharedProps, VersionLayer};
+///
+/// let shared_props = SharedProps::new()
+///     .value("appName", "My App")
+///     .prop_optional("auth.csrfToken", |request| {
+///         request.extension::<String>().cloned()
+///     });
+///
+/// let app: Router<()> = Router::new()
+///     .layer(Extension(shared_props))
+///     .layer(VersionLayer::new("asset-version-1"));
+/// ```
+#[derive(Clone, Default)]
+pub struct SharedProps {
+    providers: Vec<(String, SharedPropProvider)>,
+}
+
+impl SharedProps {
+    /// Creates an empty shared prop registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers a fixed serializable shared prop value.
+    pub fn value<K, T>(self, key: K, value: T) -> Self
+    where
+        K: Into<String>,
+        T: Clone + Send + Sync + Serialize + 'static,
+    {
+        self.prop(key, move |_request| value.clone())
+    }
+
+    /// Registers a request-aware shared prop provider.
+    ///
+    /// The provider should return an owned serializable value. For values read
+    /// from request extensions, clone the value before returning it.
+    pub fn prop<K, F, T>(mut self, key: K, provider: F) -> Self
+    where
+        K: Into<String>,
+        F: Fn(&InertiaRequest) -> T + Send + Sync + 'static,
+        T: Serialize,
+    {
+        let provider = Arc::new(move |request: &InertiaRequest| {
+            serde_json::to_value(provider(request)).map(Some)
+        });
+
+        self.providers.push((key.into(), provider));
+        self
+    }
+
+    /// Registers a request-aware shared prop provider that can skip its key.
+    ///
+    /// Returning `None` omits the shared prop instead of serializing it as
+    /// JSON `null`.
+    pub fn prop_optional<K, F, T>(mut self, key: K, provider: F) -> Self
+    where
+        K: Into<String>,
+        F: Fn(&InertiaRequest) -> Option<T> + Send + Sync + 'static,
+        T: Serialize,
+    {
+        let provider = Arc::new(move |request: &InertiaRequest| {
+            provider(request).map(serde_json::to_value).transpose()
+        });
+
+        self.providers.push((key.into(), provider));
+        self
+    }
+
+    /// Returns `true` when no shared props have been registered.
+    pub fn is_empty(&self) -> bool {
+        self.providers.is_empty()
+    }
+
+    fn resolve(
+        &self,
+        request: &InertiaRequest,
+        page: &Page<Value>,
+    ) -> Result<Vec<(String, Value)>, serde_json::Error> {
+        self.providers
+            .iter()
+            .filter(|(key, _provider)| !page.owns_prop_root(key))
+            .filter_map(|(key, provider)| match provider(request) {
+                Ok(Some(value)) => Some(Ok((key.clone(), value))),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+}
+
 /// Axum request extractor for Inertia protocol state.
 ///
 /// Use this extractor in handlers that return Inertia page responses. Pair it
 /// with [`VersionLayer`] when page objects should include an asset version and
 /// stale Inertia visits should receive a `409 Conflict` response.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct InertiaRequest {
     context: RequestContext,
+    extensions: Option<Arc<Extensions>>,
     method: Method,
+    shared_props: Option<SharedProps>,
     uri: String,
     version: Option<String>,
+}
+
+impl fmt::Debug for InertiaRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InertiaRequest")
+            .field("context", &self.context)
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .field("version", &self.version)
+            .field("has_shared_props", &self.shared_props.is_some())
+            .finish()
+    }
 }
 
 impl InertiaRequest {
@@ -202,6 +324,22 @@ impl InertiaRequest {
     /// Returns the current asset version installed by [`VersionLayer`].
     pub fn asset_version(&self) -> Option<&str> {
         self.version.as_deref()
+    }
+
+    /// Returns a request extension value inserted by an Axum layer.
+    ///
+    /// `InertiaRequest` captures extensions at extraction time. Values inserted
+    /// by earlier layers are available here; values inserted by later
+    /// extractors depend on handler argument order. The extension snapshot is
+    /// retained for shared-prop providers, so this returns `None` when no
+    /// [`SharedProps`] extension is registered.
+    pub fn extension<T>(&self) -> Option<&T>
+    where
+        T: Send + Sync + 'static,
+    {
+        self.extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get::<T>())
     }
 
     /// Converts an [`Inertia`] value into an Axum response.
@@ -227,7 +365,19 @@ impl InertiaRequest {
             .url()
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| self.uri.clone());
-        let page = inertia.into_page(url, self.version.clone(), &context)?;
+        let mut page = inertia.into_page(url, self.version.clone(), &context)?;
+
+        if let Some(shared_props) = &self.shared_props {
+            if !shared_props.is_empty() {
+                let mut shared_request = self.clone();
+                shared_request.context = context.clone();
+                let resolved_shared_props = shared_props.resolve(&shared_request, &page)?;
+
+                if !resolved_shared_props.is_empty() {
+                    page = page.with_shared_props(resolved_shared_props);
+                }
+            }
+        }
 
         if context.is_inertia() {
             let mut response = Json(page).into_response();
@@ -280,10 +430,18 @@ where
             .extensions
             .get::<InertiaVersion>()
             .map(|version| version.0.clone());
+        let shared_props = parts.extensions.get::<SharedProps>().cloned();
+        let extensions = shared_props.as_ref().map(|_shared_props| {
+            let mut extensions = parts.extensions.clone();
+            extensions.remove::<SharedProps>();
+            Arc::new(extensions)
+        });
 
         Ok(Self {
             context,
+            extensions,
             method: parts.method.clone(),
+            shared_props,
             uri: parts
                 .extensions
                 .get::<OriginalUri>()
@@ -396,9 +554,11 @@ mod tests {
     use ::axum::http::{Request, StatusCode};
     use ::axum::response::Html;
     use ::axum::routing::get;
+    use ::axum::Extension;
     use ::axum::Router;
     use serde::Serialize;
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -417,6 +577,14 @@ mod tests {
     struct TextProps {
         text: String,
     }
+
+    #[derive(Clone)]
+    struct User {
+        name: &'static str,
+    }
+
+    #[derive(Clone)]
+    struct CsrfToken(String);
 
     async fn page(request: InertiaRequest) -> Result<Response, InertiaError> {
         request.render(
@@ -452,6 +620,22 @@ mod tests {
                 },
             )
             .with_url("/custom-url"),
+            |context| Html(context.data_page().to_owned()),
+        )
+    }
+
+    async fn route_auth(request: InertiaRequest) -> Result<Response, InertiaError> {
+        request.render(
+            Inertia::response(
+                "route-auth",
+                json!({
+                    "auth": {
+                        "user": {
+                            "name": "Route"
+                        }
+                    }
+                }),
+            ),
             |context| Html(context.data_page().to_owned()),
         )
     }
@@ -529,6 +713,7 @@ mod tests {
             .route("/foo", get(page).post(page))
             .route("/custom-url", get(custom_url))
             .route("/builder", get(builder_page))
+            .route("/route-auth", get(route_auth))
             .route("/lazy", get(lazy_page))
             .route("/unsafe", get(unsafe_page))
             .route("/external", get(external).post(external))
@@ -538,6 +723,30 @@ mod tests {
             .route("/relative-go", get(relative_redirect))
             .route("/bad-go", get(bad_redirect))
             .layer(VersionLayer::new("1"))
+    }
+
+    fn app_with_shared_props() -> Router {
+        let shared_props = SharedProps::new()
+            .value("appName", "Demo")
+            .value("n", 99)
+            .prop("auth.user", |request| {
+                request
+                    .extension::<User>()
+                    .map(|user| json!({ "name": user.name }))
+            })
+            .prop("csrfToken", |request| {
+                request
+                    .extension::<CsrfToken>()
+                    .map(|token| token.0.clone())
+            });
+
+        app_with_shared_props_registry(shared_props)
+            .layer(Extension(User { name: "Ada" }))
+            .layer(Extension(CsrfToken("token-shared".into())))
+    }
+
+    fn app_with_shared_props_registry(shared_props: SharedProps) -> Router {
+        app().layer(Extension(shared_props))
     }
 
     fn app_without_layer() -> Router {
@@ -799,6 +1008,282 @@ mod tests {
         assert_eq!(page["props"]["audit"], json!(["created"]));
         assert!(page["props"].get("users").is_none());
         assert!(page.get("deferredProps").is_none());
+    }
+
+    #[tokio::test]
+    async fn shared_props_are_merged_into_html_responses() {
+        let response = app_with_shared_props()
+            .oneshot(Request::builder().uri("/foo").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = ::axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = std::str::from_utf8(&body).unwrap();
+        let data_page = body
+            .split("<script data-page=\"app\" type=\"application/json\">")
+            .nth(1)
+            .and_then(|tail| tail.split("</script>").next())
+            .unwrap();
+        let page: serde_json::Value = serde_json::from_str(data_page).unwrap();
+
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Ada");
+        assert_eq!(page["props"]["csrfToken"], "token-shared");
+        assert_eq!(page["props"]["n"], 42);
+        assert_eq!(page["sharedProps"], json!(["appName", "auth", "csrfToken"]));
+    }
+
+    #[tokio::test]
+    async fn shared_props_are_merged_into_json_responses() {
+        let response = app_with_shared_props()
+            .oneshot(
+                Request::builder()
+                    .uri("/foo")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Ada");
+        assert_eq!(page["props"]["csrfToken"], "token-shared");
+        assert_eq!(page["props"]["n"], 42);
+        assert_eq!(page["sharedProps"], json!(["appName", "auth", "csrfToken"]));
+    }
+
+    #[tokio::test]
+    async fn partial_reloads_include_shared_props_but_preserve_route_owned_roots() {
+        let response = app_with_shared_props()
+            .oneshot(
+                Request::builder()
+                    .uri("/foo")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .header(X_INERTIA_PARTIAL_COMPONENT, "foo")
+                    .header(X_INERTIA_PARTIAL_DATA, "stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["stats"], 7);
+        assert!(page["props"].get("n").is_none());
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Ada");
+        assert_eq!(page["props"]["csrfToken"], "token-shared");
+        assert_eq!(page["sharedProps"], json!(["appName", "auth", "csrfToken"]));
+    }
+
+    #[tokio::test]
+    async fn skipped_colliding_shared_props_are_not_resolved() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let shared_props = SharedProps::new()
+            .value("appName", "Demo")
+            .prop("auth.user", {
+                let calls = Arc::clone(&calls);
+                move |_request| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    json!({ "name": "Shared" })
+                }
+            });
+        let response = app_with_shared_props_registry(shared_props)
+            .oneshot(
+                Request::builder()
+                    .uri("/route-auth")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Route");
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert_eq!(page["sharedProps"], json!(["appName"]));
+    }
+
+    #[tokio::test]
+    async fn shared_props_see_effective_non_get_context() {
+        let shared_props = SharedProps::new().prop("partialComponent", |request| {
+            request
+                .context()
+                .partial_component()
+                .unwrap_or("none")
+                .to_owned()
+        });
+        let response = app_with_shared_props_registry(shared_props)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/foo")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_PARTIAL_COMPONENT, "foo")
+                    .header(X_INERTIA_PARTIAL_DATA, "stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["partialComponent"], "none");
+        assert_eq!(page["props"]["n"], 42);
+        assert_eq!(page["props"]["notifications"], json!(["welcome"]));
+        assert!(page["props"].get("stats").is_none());
+    }
+
+    #[tokio::test]
+    async fn optional_shared_props_can_skip_missing_values() {
+        let shared_props =
+            SharedProps::new()
+                .value("appName", "Demo")
+                .prop_optional("csrfToken", |request| {
+                    request
+                        .extension::<CsrfToken>()
+                        .map(|token| token.0.clone())
+                });
+        let response = app_with_shared_props_registry(shared_props)
+            .oneshot(
+                Request::builder()
+                    .uri("/foo")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert!(page["props"].get("csrfToken").is_none());
+        assert_eq!(page["sharedProps"], json!(["appName"]));
+    }
+
+    #[tokio::test]
+    async fn dotted_shared_props_merge_with_each_other() {
+        let shared_props = SharedProps::new()
+            .value("auth.user", json!({ "name": "Ada" }))
+            .value("auth.csrf", "token-shared");
+        let response = app_with_shared_props_registry(shared_props)
+            .oneshot(
+                Request::builder()
+                    .uri("/lazy")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Ada");
+        assert_eq!(page["props"]["auth"]["csrf"], "token-shared");
+        assert_eq!(page["sharedProps"], json!(["auth"]));
+    }
+
+    #[tokio::test]
+    async fn empty_shared_props_are_a_noop_for_non_object_props() {
+        let request = request_context(&HeaderMap::new());
+        let request = InertiaRequest {
+            context: request,
+            extensions: Some(Arc::new(Extensions::new())),
+            method: Method::GET,
+            shared_props: Some(SharedProps::new()),
+            uri: "/empty".into(),
+            version: None,
+        };
+        let response = request
+            .render(Inertia::response("empty", ()), |context| {
+                Html(context.data_page().to_owned())
+            })
+            .unwrap();
+        let body = ::axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let page: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(page["props"], serde_json::Value::Null);
+        assert!(page.get("sharedProps").is_none());
+    }
+
+    #[tokio::test]
+    async fn shared_prop_serialization_errors_become_internal_server_errors() {
+        let shared_props = SharedProps::new().prop("bad", |_request| {
+            let mut value = BTreeMap::new();
+            value.insert((1, 2), 3);
+            value
+        });
+        let response = app_with_shared_props_registry(shared_props)
+            .oneshot(
+                Request::builder()
+                    .uri("/foo")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn shared_dotted_props_do_not_replace_route_owned_roots() {
+        let response = app_with_shared_props()
+            .oneshot(
+                Request::builder()
+                    .uri("/route-auth")
+                    .header(X_INERTIA, "true")
+                    .header(X_INERTIA_VERSION, "1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let page = body_json(response).await;
+
+        assert_eq!(page["props"]["auth"]["user"]["name"], "Route");
+        assert_eq!(page["props"]["appName"], "Demo");
+        assert_eq!(page["props"]["n"], 99);
+        assert_eq!(page["props"]["csrfToken"], "token-shared");
+        assert_eq!(page["sharedProps"], json!(["appName", "n", "csrfToken"]));
     }
 
     #[tokio::test]

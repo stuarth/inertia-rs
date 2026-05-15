@@ -1288,6 +1288,20 @@ impl<T> Page<T> {
 }
 
 impl Page<Value> {
+    #[cfg(feature = "axum")]
+    pub(crate) fn owns_prop_root(&self, prop: &str) -> bool {
+        let root = prop_root(prop);
+
+        if self.route_props.0.is_empty() {
+            self.props
+                .as_object()
+                .map(|props| props.contains_key(root))
+                .unwrap_or(false)
+        } else {
+            self.route_props.0.iter().any(|prop| prop == root)
+        }
+    }
+
     /// Merges shared props into the page object.
     ///
     /// Existing page props take precedence when keys collide. Dotted keys are
@@ -1298,6 +1312,12 @@ impl Page<Value> {
         I: IntoIterator<Item = (K, Value)>,
         K: Into<String>,
     {
+        let mut shared_props = shared_props.into_iter().peekable();
+
+        if shared_props.peek().is_none() {
+            return self;
+        }
+
         if !self.props.is_object() {
             self.props = Value::Object(Map::new());
         }
@@ -2378,6 +2398,16 @@ mod tests {
         assert!(value["props"].get("auth").is_none());
         assert_eq!(value["props"]["appName"], "Demo");
         assert_eq!(value["sharedProps"], json!(["appName"]));
+    }
+
+    #[test]
+    fn empty_shared_props_are_a_noop() {
+        let page = Page::new("Empty", Value::Null, "/empty")
+            .with_shared_props(Vec::<(&str, Value)>::new());
+        let value = serde_json::to_value(page).unwrap();
+
+        assert_eq!(value["props"], Value::Null);
+        assert!(value.get("sharedProps").is_none());
     }
 
     #[test]

@@ -19,9 +19,9 @@ Inertia lets you build server-driven applications that render client-side pages 
 - Inertia v3 page-object metadata and response filtering for partial reloads, merge props, deferred prop keys, once props, history flags, and infinite-scroll metadata.
 - Framework-neutral `InertiaProps` for synchronous lazy, optional, deferred, and once prop resolvers.
 - Rocket shared props with request-aware providers.
-- Axum request extraction, response helpers, and asset-version middleware.
+- Axum request extraction, shared props, response helpers, and asset-version middleware.
 
-Async prop resolvers, SSR, and full shared-prop support outside Rocket are planned but not fully implemented yet.
+Async prop resolvers and SSR are planned but not fully implemented yet.
 
 The minimum supported Rust version is 1.88.
 
@@ -41,11 +41,11 @@ The minimum supported Rust version is 1.88.
 | Deferred props | Partial | `InertiaProps::defer` emits `deferredProps` metadata and resolves synchronous values only when requested. Async deferred resolvers are planned. |
 | Lazy or async props | Partial | `InertiaProps` supports synchronous lazy, optional, always, deferred, and once props. Async resolvers are planned. |
 | Once props | Supported | `onceProps` metadata and `X-Inertia-Except-Once-Props` filtering are modeled. |
-| Shared props | Supported | Rocket managed state can merge common props into every page response. |
+| Shared props | Supported | Rocket managed state and Axum extension layers can merge common props into every page response. |
 | External location redirects | Supported | `Inertia::location` maps Inertia visits to `409 Conflict` with `X-Inertia-Location`. |
 | Method-aware redirects | Supported | `Inertia::redirect` returns `303 See Other` for write methods. |
 | SSR | Not supported | No server-side rendering bridge is provided. |
-| Axum | Partial | `InertiaRequest`, `VersionLayer`, page rendering, external locations, and method-aware redirects are available. Shared props are Rocket-only for now. |
+| Axum | Partial | `InertiaRequest`, `VersionLayer`, `SharedProps`, page rendering, external locations, and method-aware redirects are available. |
 
 ## Installation
 
@@ -154,8 +154,8 @@ The repository includes a Rocket + Svelte 5 + Vite example under `examples/rocke
 ```rust
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
-use inertia_rs::axum::{InertiaError, InertiaRequest, VersionLayer};
+use axum::{Extension, Router};
+use inertia_rs::axum::{InertiaError, InertiaRequest, SharedProps, VersionLayer};
 use inertia_rs::Inertia;
 
 #[derive(serde::Serialize)]
@@ -173,6 +173,7 @@ async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
 
 let app = Router::new()
     .route("/hello", get(hello))
+    .layer(Extension(SharedProps::new().value("appName", "Demo")))
     .layer(VersionLayer::new("asset-version-1"));
 ```
 
@@ -228,9 +229,9 @@ use inertia_rs::{Page, PageMetadata, RequestContext};
 
 Rocket responses use these types internally. `RequestContext` parses Inertia headers such as `X-Inertia-Partial-Data`, `X-Inertia-Partial-Except`, `X-Inertia-Reset`, and `X-Inertia-Except-Once-Props`.
 
-## Rocket Shared Props
+## Shared Props
 
-Register `rocket::SharedProps` as managed state to merge common application data into every Rocket page response.
+For Rocket, register `rocket::SharedProps` as managed state to merge common application data into every page response.
 
 ```rust
 use inertia_rs::rocket::SharedProps;
@@ -244,7 +245,25 @@ let shared_props = SharedProps::new()
 let rocket = rocket::build().manage(shared_props);
 ```
 
-Shared props are shallow-merged into page props for HTML first loads and JSON Inertia responses. Route props win on key collisions, including when a route-defined root such as `auth` collides with dotted shared keys such as `auth.user`. Keys may be top-level or dotted, where `auth.user` becomes `props.auth.user`; inserted top-level keys are listed in `sharedProps`. Keep shared props small and namespace them, since they are merged after partial-reload filtering and remain included on partial reload responses.
+Axum apps can register `axum::SharedProps` through an `Extension` layer. Providers receive the extracted `InertiaRequest` and can read values inserted by other Axum layers through `request.extension::<T>()`.
+
+```rust
+use axum::{Extension, Router};
+use inertia_rs::axum::SharedProps;
+
+let shared_props = SharedProps::new()
+    .value("appName", "My App")
+.prop("auth.user", |request| {
+        request.extension::<User>().map(|user| user.summary())
+    });
+
+let app = Router::new().layer(Extension(shared_props));
+```
+
+Use `prop_optional` when a missing value should omit the key instead of
+serializing as `null`.
+
+Shared props are shallow-merged into page props for HTML first loads and JSON Inertia responses. Route props win on key collisions, including when a route-defined root such as `auth` collides with dotted shared keys such as `auth.user`. Keys may be top-level or dotted, where `auth.user` becomes `props.auth.user`; inserted top-level keys are listed in `sharedProps`. Keep shared props small and namespace them, since they are merged after partial-reload filtering and remain included on partial reload responses. This crate intentionally keeps shared props in partial reload responses; request specific values explicitly with route props when a large shared value should be omitted from a reload.
 
 ## Redirect Helpers
 

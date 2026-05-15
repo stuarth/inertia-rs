@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - Initial Axum integration with `InertiaRequest`, `VersionLayer`, page response rendering, external locations, and method-aware redirects.
 - Minimal Axum example.
 - `InertiaProps` and `ScopedInertiaProps` for synchronous lazy, optional, deferred, and once prop resolvers.
+- Axum `SharedProps` extension support for common page props.
 - README protocol support matrix.
 
 ### Changed
