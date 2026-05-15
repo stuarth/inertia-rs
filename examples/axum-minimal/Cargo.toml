@@ -1,0 +1,12 @@
+[package]
+name = "axum-minimal"
+version = "0.1.0"
+edition = "2021"
+workspace = "../"
+publish = false
+
+[dependencies]
+axum = "0.8"
+inertia_rs = { path = "../..", default-features = false, features = ["axum"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }

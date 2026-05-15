@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 - `Inertia::location` for external Inertia redirects.
 - `Inertia::redirect` for method-aware application redirects.
 - Rocket `SharedProps` managed state for common page props.
+- Initial Axum integration with `InertiaRequest`, `VersionLayer`, page response rendering, external locations, and method-aware redirects.
+- Minimal Axum example.
 - README protocol support matrix.
 
 ### Changed

@@ -4,7 +4,7 @@
 [![Build Status](https://github.com/stuarth/inertia-rs/workflows/CI/badge.svg)](https://github.com/stuarth/inertia-rs/actions)
 [![docs.rs](https://img.shields.io/badge/docs-latest-blue.svg?style=flat)](https://docs.rs/inertia_rs/)
 
-[Inertia.js](https://inertiajs.com/) adapter support for Rust web applications. The crate currently provides a Rocket integration.
+[Inertia.js](https://inertiajs.com/) adapter support for Rust web applications. The crate currently provides Rocket integration and an initial Axum integration.
 
 Inertia lets you build server-driven applications that render client-side pages without adding a separate API or client-side router. Your Rust routes return page components and props; the Inertia client handles navigation and page swaps in the browser.
 
@@ -18,8 +18,9 @@ Inertia lets you build server-driven applications that render client-side pages 
 - `409 Conflict` responses with `X-Inertia-Location` for stale assets.
 - Inertia v3 page-object metadata and response filtering for partial reloads, merge props, deferred prop keys, once props, history flags, and infinite-scroll metadata.
 - Rocket shared props with request-aware providers.
+- Axum request extraction, response helpers, and asset-version middleware.
 
-Lazy or async prop resolvers, SSR, and non-Rocket framework integrations are planned but not fully implemented yet.
+Lazy or async prop resolvers, SSR, and full shared-prop support outside Rocket are planned but not fully implemented yet.
 
 The minimum supported Rust version is 1.88.
 
@@ -43,7 +44,7 @@ The minimum supported Rust version is 1.88.
 | External location redirects | Supported | `Inertia::location` maps Inertia visits to `409 Conflict` with `X-Inertia-Location`. |
 | Method-aware redirects | Supported | `Inertia::redirect` returns `303 See Other` for write methods. |
 | SSR | Not supported | No server-side rendering bridge is provided. |
-| Axum | Planned | Framework expansion is deferred until the Rocket integration settles on the protocol core. |
+| Axum | Partial | `InertiaRequest`, `VersionLayer`, page rendering, external locations, and method-aware redirects are available. Shared props are Rocket-only for now. |
 
 ## Installation
 
@@ -57,6 +58,14 @@ rocket = { version = "0.5.1", features = ["json"] }
 [dependencies.rocket_dyn_templates]
 version = "0.2.0"
 features = ["handlebars"]
+```
+
+For Axum applications, enable the `axum` feature instead:
+
+```toml
+[dependencies]
+inertia_rs = { version = "0.3.0", default-features = false, features = ["axum"] }
+axum = "0.8"
 ```
 
 ## Rocket Usage
@@ -136,6 +145,37 @@ Your root HTML template receives `data_page`, a JSON-serialized Inertia page obj
 ```
 
 The repository includes a Rocket + Svelte 5 + Vite example under `examples/rocket-svelte`.
+
+## Axum Usage
+
+`axum::InertiaRequest` extracts the parsed Inertia request context, current URI, request method, and optional asset version. Add `axum::VersionLayer` to install asset-version checks and include the active version in page objects.
+
+```rust
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::get;
+use axum::Router;
+use inertia_rs::axum::{InertiaError, InertiaRequest, VersionLayer};
+use inertia_rs::Inertia;
+
+#[derive(serde::Serialize)]
+struct Hello {
+    name: String,
+}
+
+async fn hello(request: InertiaRequest) -> Result<Response, InertiaError> {
+    request.render(
+        Inertia::response("Hello", Hello { name: "world".into() }),
+        // data_page is already escaped for safe embedding in a script element.
+        |ctx| Html(format!(r#"<script data-page="app" type="application/json">{}</script>"#, ctx.data_page())).into_response(),
+    )
+}
+
+let app = Router::new()
+    .route("/hello", get(hello))
+    .layer(VersionLayer::new("asset-version-1"));
+```
+
+The repository includes a minimal Axum example under `examples/axum-minimal`.
 
 ## Inertia v3 Protocol Helpers
 

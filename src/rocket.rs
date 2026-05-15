@@ -2,7 +2,10 @@
 
 //! Rocket integration for `inertia_rs`.
 
-use super::{Inertia, Location, Redirect, RequestContext, VARY, X_INERTIA, X_INERTIA_LOCATION};
+use super::{
+    html_response_context, Inertia, Location, Redirect, RequestContext, VARY, X_INERTIA,
+    X_INERTIA_LOCATION,
+};
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::{self, uri::Reference, Method};
 use rocket::request::{FromRequest, Outcome, Request};
@@ -14,6 +17,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::trace;
+
+pub use super::HtmlResponseContext;
 
 const BASE_ROUTE: &str = "/inertia-rs";
 
@@ -135,41 +140,6 @@ impl<'r> FromRequest<'r> for InertiaHeaders {
     }
 }
 
-#[derive(Serialize)]
-/// Context passed to the application HTML response renderer.
-pub struct HtmlResponseContext {
-    data_page: String,
-}
-
-impl HtmlResponseContext {
-    /// Returns the JSON-serialized Inertia page object.
-    pub fn data_page(&self) -> &str {
-        &self.data_page
-    }
-}
-
-fn escape_json_for_html_script(json: &str) -> String {
-    json.chars()
-        .fold(String::with_capacity(json.len()), |mut escaped, c| {
-            match c {
-                '<' => escaped.push_str("\\u003C"),
-                '>' => escaped.push_str("\\u003E"),
-                '&' => escaped.push_str("\\u0026"),
-                '\u{2028}' => escaped.push_str("\\u2028"),
-                '\u{2029}' => escaped.push_str("\\u2029"),
-                _ => escaped.push(c),
-            }
-
-            escaped
-        })
-}
-
-fn serialize_page_for_html<T: Serialize>(page: &T) -> Result<String, http::Status> {
-    serde_json::to_string(page)
-        .map(|json| escape_json_for_html_script(&json))
-        .map_err(|_e| http::Status::InternalServerError)
-}
-
 #[derive(Clone)]
 struct InertiaVersion(String);
 
@@ -236,9 +206,8 @@ impl<'r, 'o: 'r, R: Serialize> Responder<'r, 'o> for Inertia<R> {
                 .raw_header_adjoin(VARY, X_INERTIA)
                 .ok()
         } else {
-            let ctx = HtmlResponseContext {
-                data_page: serialize_page_for_html(&inertia_response)?,
-            };
+            let ctx = html_response_context(&inertia_response)
+                .map_err(|_e| http::Status::InternalServerError)?;
 
             match request.rocket().state::<ResponderFn>() {
                 Some(f) => f.0(request, &ctx).map(add_vary_header),

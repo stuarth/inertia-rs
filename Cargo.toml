@@ -7,20 +7,28 @@ license = "MIT"
 homepage = "https://github.com/stuarth/inertia-rs"
 repository = "https://github.com/stuarth/inertia-rs"
 description = "Inertia.js for Rust"
-keywords = ["inertia", "web", "framework", "rocket"]
+keywords = ["inertia", "web", "framework", "rocket", "axum"]
 categories = ["web-programming"]
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+axum = { version = "0.8", optional = true }
+fluent-uri = { version = "0.4", optional = true }
 rocket = { version = "0.5", features = ["json"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
+tower = { version = "0.5", features = ["util"], optional = true }
 tracing = "0.1"
 
 [features]
 default = ["rocket"]
+axum = ["dep:axum", "dep:fluent-uri", "dep:tower"]
+rocket = ["dep:rocket"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
 
 [package.metadata.docs.rs]
 all-features = true

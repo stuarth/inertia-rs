@@ -24,6 +24,10 @@
 #[cfg(feature = "rocket")]
 pub mod rocket;
 
+/// Axum integration for Inertia responses and asset version checks.
+#[cfg(feature = "axum")]
+pub mod axum;
+
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -86,6 +90,56 @@ pub mod headers {
         X_INERTIA_PARTIAL_COMPONENT, X_INERTIA_PARTIAL_DATA, X_INERTIA_PARTIAL_EXCEPT,
         X_INERTIA_REDIRECT, X_INERTIA_RESET, X_INERTIA_VERSION, X_REQUESTED_WITH,
     };
+}
+
+/// Context passed to framework HTML response renderers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HtmlResponseContext {
+    data_page: String,
+}
+
+impl HtmlResponseContext {
+    /// Creates a context from a serialized page object string.
+    ///
+    /// Framework integrations construct this with script-safe JSON. If you
+    /// create it manually, make sure the value is safe for its target HTML
+    /// context.
+    pub fn new<D: Into<String>>(data_page: D) -> Self {
+        Self {
+            data_page: data_page.into(),
+        }
+    }
+
+    /// Returns the JSON-serialized Inertia page object.
+    pub fn data_page(&self) -> &str {
+        &self.data_page
+    }
+}
+
+#[cfg(any(feature = "rocket", feature = "axum"))]
+fn escape_json_for_html_script(json: &str) -> String {
+    json.chars()
+        .fold(String::with_capacity(json.len()), |mut escaped, c| {
+            match c {
+                '<' => escaped.push_str("\\u003C"),
+                '>' => escaped.push_str("\\u003E"),
+                '&' => escaped.push_str("\\u0026"),
+                '\u{2028}' => escaped.push_str("\\u2028"),
+                '\u{2029}' => escaped.push_str("\\u2029"),
+                _ => escaped.push(c),
+            }
+
+            escaped
+        })
+}
+
+#[cfg(any(feature = "rocket", feature = "axum"))]
+pub(crate) fn html_response_context<T: Serialize>(
+    page: &T,
+) -> Result<HtmlResponseContext, serde_json::Error> {
+    serde_json::to_string(page)
+        .map(|json| escape_json_for_html_script(&json))
+        .map(HtmlResponseContext::new)
 }
 
 fn is_false(value: &bool) -> bool {
